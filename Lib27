@@ -1997,11 +1997,14 @@
 		function library:esp_preview(properties)
 			local cfg = {items = {}, rotation = 0; objects = {};}
 
-			lp.Character.Archivable = true
-			local character = lp.Character:Clone()
-			character.Animate:Destroy()
+			local character = nil
+			if lp.Character then
+				lp.Character.Archivable = true
+				character = lp.Character:Clone()
+				character.Animate:Destroy()
+			end
 
-			local items = cfg.items; do 
+			local items = cfg.items; do
 				items.viewportframe = library:create( "ViewportFrame" , {
 					Parent = self.holder;
 					BackgroundTransparency = 1;
@@ -2012,7 +2015,7 @@
 					BorderSizePixel = 0;
 					BackgroundColor3 = rgb(255, 255, 255)
 				});
-				
+
 				items.camera = library:create( "Camera" , {
 					FieldOfView = 70.00022888183594;
 					CameraType = Enum.CameraType.Track;
@@ -2020,19 +2023,21 @@
 					CFrame = cfr(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1);
 					Parent = ws;
 					Name = "\0"
-				}); 
+				});
 
 				items.viewportframe.CurrentCamera = items.camera -- sick
-				character.Parent = items.viewportframe
 
-				items.camera.CameraSubject = character
+				if character then
+					character.Parent = items.viewportframe
+					items.camera.CameraSubject = character
 
-				library:connection(run.RenderStepped, function()
-					task.wait()
-					cfg.rotation += 0.5
-					character:SetPrimaryPartCFrame(cfr(Vector3.new(0, 1, -6)) * angle(0, math.rad(cfg.rotation), 0))
-				end)
-			end 
+					library:connection(run.RenderStepped, function()
+						task.wait()
+						cfg.rotation += 0.5
+						character:SetPrimaryPartCFrame(cfr(Vector3.new(0, 1, -6)) * angle(0, math.rad(cfg.rotation), 0))
+					end)
+				end
+			end
 
 			local objects = cfg.objects; do 
 				objects[ "holder" ] = library:create( "Frame" , {
