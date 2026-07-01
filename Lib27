@@ -1794,7 +1794,7 @@
 
 					local function applyLibFont(font)
 						library.font = font
-						for _, gui in ipairs(library.guis) do
+						local function updateGui(gui)
 							pcall(function()
 								for _, inst in ipairs(gui:GetDescendants()) do
 									if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
@@ -1803,6 +1803,17 @@
 								end
 							end)
 						end
+						for _, gui in ipairs(library.guis) do
+							updateGui(gui)
+						end
+						-- also cover ESP, inv viewer and any other guis not tracked by library
+						pcall(function()
+							for _, child in ipairs(gethui():GetChildren()) do
+								if child:IsA("ScreenGui") then
+									updateGui(child)
+								end
+							end
+						end)
 					end
 
 					local fontPathMap = {}
