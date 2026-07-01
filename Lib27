@@ -1862,24 +1862,28 @@
 							library:notification({text = "Not found – hit Refresh first", time = 4})
 							return
 						end
-						local asset = getcustomasset(path)
-						if not asset or asset == "" then
-							library:notification({text = "Font: asset failed – " .. filename, time = 5})
-							return
-						end
 						local ok, err = pcall(function()
-							applyLibFont(Font.new(asset, Enum.FontWeight.Regular, Enum.FontStyle.Normal))
+							local ttf_asset = getcustomasset(path)
+							local font_name = filename:gsub("%.[^%.]+$", "")
+							local descriptor = http_service:JSONEncode({
+								name = font_name,
+								faces = {{
+									name = "Regular",
+									weight = 400,
+									style = "normal",
+									assetId = ttf_asset
+								}}
+							})
+							local json_path = library.directory .. "/fonts/_tmp.json"
+							writefile(json_path, descriptor)
+							local json_asset = getcustomasset(json_path)
+							applyLibFont(Font.new(json_asset, Enum.FontWeight.Regular))
 						end)
-						if not ok then
-							local ok2, err2 = pcall(function()
-								applyLibFont(Font.new(asset))
-							end)
-							if not ok2 then
-								library:notification({text = "Font error: " .. tostring(err2), time = 5})
-								return
-							end
+						if ok then
+							library:notification({text = "Applied: " .. filename, time = 3})
+						else
+							library:notification({text = "Font error: " .. tostring(err), time = 5})
 						end
-						library:notification({text = "Applied: " .. filename, time = 3})
 					end})
 					fontSec:button({name = "Refresh", callback = function()
 						library:font_list_update()
