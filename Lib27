@@ -1805,8 +1805,17 @@
 						end
 					end
 
-					local customFontActive = false
 					local fontPathMap = {}
+					local PRESET_FONTS = {
+						["[Default]"]         = function() return defaultFont end,
+						["[Source Sans Pro]"] = function() return Font.new("rbxasset://fonts/families/SourceSansPro.json") end,
+						["[Inconsolata]"]     = function() return Font.new("rbxasset://fonts/families/Inconsolata.json") end,
+						["[Roboto Mono]"]     = function() return Font.new("rbxasset://fonts/families/RobotoMono.json") end,
+						["[Ubuntu]"]          = function() return Font.new("rbxasset://fonts/families/Ubuntu.json") end,
+						["[Montserrat]"]      = function() return Font.new("rbxasset://fonts/families/Montserrat.json") end,
+						["[Nunito]"]          = function() return Font.new("rbxasset://fonts/families/Nunito.json") end,
+					}
+					local PRESET_ORDER = {"[Default]","[Source Sans Pro]","[Inconsolata]","[Roboto Mono]","[Ubuntu]","[Montserrat]","[Nunito]"}
 
 					function library:font_list_update()
 						if not font_holder then return end
@@ -1814,6 +1823,9 @@
 						if not isfolder(dir) then pcall(makefolder, dir) end
 						local list = {}
 						fontPathMap = {}
+						for _, name in ipairs(PRESET_ORDER) do
+							list[#list + 1] = name
+						end
 						for _, file in next, listfiles(dir) do
 							local name = file:match("[^\\/]+$")
 							if name and (name:lower():match("%.ttf$") or name:lower():match("%.otf$")) then
@@ -1832,10 +1844,22 @@
 							library:notification({text = "No font selected", time = 3})
 							return
 						end
+						if PRESET_FONTS[sel] then
+							local ok, err = pcall(function()
+								local f = type(PRESET_FONTS[sel]) == "function" and PRESET_FONTS[sel]() or PRESET_FONTS[sel]
+								applyLibFont(f)
+							end)
+							if ok then
+								library:notification({text = "Applied: " .. sel, time = 3})
+							else
+								library:notification({text = "Preset error: " .. tostring(err), time = 5})
+							end
+							return
+						end
 						local filename = sel:match("[^\\/]+$") or sel
 						local path = fontPathMap[filename]
 						if not path then
-							library:notification({text = "Font not found in map: " .. filename, time = 5})
+							library:notification({text = "Not found – hit Refresh first", time = 4})
 							return
 						end
 						local asset = getcustomasset(path)
@@ -1855,30 +1879,11 @@
 								return
 							end
 						end
-						customFontActive = true
 						library:notification({text = "Applied: " .. filename, time = 3})
 					end})
 					fontSec:button({name = "Refresh", callback = function()
 						library:font_list_update()
 					end})
-					fontSec:dropdown({name = "Preset", flag = "lib_font_preset",
-						items = {"Pixel (Default)", "Source Sans Pro", "Inconsolata", "Roboto Mono", "Ubuntu", "Montserrat", "Nunito"},
-						default = "Pixel (Default)",
-						callback = function(sel)
-							customFontActive = false
-							local presets = {
-								["Pixel (Default)"]  = defaultFont,
-								["Source Sans Pro"]  = Font.new("rbxasset://fonts/families/SourceSansPro.json"),
-								["Inconsolata"]      = Font.new("rbxasset://fonts/families/Inconsolata.json"),
-								["Roboto Mono"]      = Font.new("rbxasset://fonts/families/RobotoMono.json"),
-								["Ubuntu"]           = Font.new("rbxasset://fonts/families/Ubuntu.json"),
-								["Montserrat"]       = Font.new("rbxasset://fonts/families/Montserrat.json"),
-								["Nunito"]           = Font.new("rbxasset://fonts/families/Nunito.json"),
-							}
-							local f = presets[sel]
-							if f then pcall(applyLibFont, f) end
-						end
-					})
 			--
 					
 			-- esp preview
