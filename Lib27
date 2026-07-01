@@ -1863,7 +1863,10 @@
 							return
 						end
 						local ok, err = pcall(function()
-							local ttf_asset = getcustomasset(path)
+							-- normalize backslashes from listfiles
+							local norm_path = path:gsub("\\", "/")
+							local ttf_asset = getcustomasset(norm_path)
+							assert(ttf_asset and ttf_asset ~= "", "getcustomasset failed: " .. norm_path)
 							local font_name = filename:gsub("%.[^%.]+$", "")
 							local descriptor = http_service:JSONEncode({
 								name = font_name,
@@ -1874,9 +1877,10 @@
 									assetId = ttf_asset
 								}}
 							})
-							local json_path = library.directory .. "/fonts/_tmp.json"
-							writefile(json_path, descriptor)
-							local json_asset = getcustomasset(json_path)
+							-- write to root with .ttf extension, same pattern as library's own font loading
+							writefile("_atl_font.ttf", descriptor)
+							local json_asset = getcustomasset("_atl_font.ttf")
+							assert(json_asset and json_asset ~= "", "descriptor getcustomasset failed")
 							applyLibFont(Font.new(json_asset, Enum.FontWeight.Regular))
 						end)
 						if ok then
