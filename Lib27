@@ -1823,11 +1823,32 @@
 					fontSec:button_holder({})
 					fontSec:button({name = "Apply Font", callback = function()
 						local sel = flags["lib_font_list"]
-						if not sel or sel == "" then return end
-						pcall(function()
-							local path = library.directory .. "/fonts/" .. sel
-							applyLibFont(Font.new(getcustomasset(path), Enum.FontWeight.Regular))
+						if not sel or sel == "" then
+							library:notification({text = "No font selected", time = 3})
+							return
+						end
+						local path = library.directory .. "/fonts/" .. sel
+						local asset = getcustomasset(path)
+						if not asset or asset == "" then
+							library:notification({text = "Font: getcustomasset failed for " .. sel, time = 5})
+							return
+						end
+						local ok, err = pcall(function()
+							applyLibFont(Font.new(asset, Enum.FontWeight.Regular, Enum.FontStyle.Normal))
 						end)
+						if not ok then
+							-- fallback: try without weight/style args
+							local ok2, err2 = pcall(function()
+								applyLibFont(Font.new(asset))
+							end)
+							if not ok2 then
+								library:notification({text = "Font error: " .. tostring(err2), time = 5})
+							else
+								library:notification({text = "Applied (fallback): " .. sel, time = 3})
+							end
+						else
+							library:notification({text = "Applied: " .. sel, time = 3})
+						end
 					end})
 					fontSec:button({name = "Refresh", callback = function()
 						library:font_list_update()
