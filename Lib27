@@ -1631,11 +1631,11 @@
 					image = "rbxassetid://115194686863276",
 				})
 
-				local watermark = library:watermark({default = os.date('Delta Project |  - %b %d %Y - %H:%M:%S')})  
+				local watermark = library:watermark({default = os.date('Atlanta |  - %b %d %Y - %H:%M:%S')})  
 
 				task.spawn(function()
 					while task.wait(1) do 
-						watermark.change_text(os.date('Delta Project - Beta - %b %d %Y - %H:%M:%S'))
+						watermark.change_text(os.date('Atlanta - Beta - %b %d %Y - %H:%M:%S'))
 					end 
 				end) 
 
@@ -1775,17 +1775,82 @@
 					section:button({name = "Unload Menu", callback = function()
 						library:load_config(library.old_config)
 
-						for _, gui in library.guis do 
-							gui:Destroy() 
-						end 
+						for _, gui in library.guis do
+							gui:Destroy()
+						end
 
-						for _, connection in library.connections do 
-							connection:Disconnect() 
+						for _, connection in library.connections do
+							connection:Disconnect()
 						end
 
 						blur:Destroy()
 					end})
-			-- 
+
+				-- font
+					local defaultFont = library.font
+					local font_holder = nil
+
+					local function applyLibFont(font)
+						library.font = font
+						for _, gui in ipairs(library.guis) do
+							pcall(function()
+								for _, inst in ipairs(gui:GetDescendants()) do
+									if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+										pcall(function() inst.FontFace = font end)
+									end
+								end
+							end)
+						end
+					end
+
+					function library:font_list_update()
+						if not font_holder then return end
+						local dir = library.directory .. "/fonts"
+						if not isfolder(dir) then pcall(makefolder, dir) end
+						local list = {}
+						for _, file in next, listfiles(dir) do
+							local name = file:gsub(dir .. "\\", ""):gsub(dir .. "/", "")
+							if name:lower():match("%.ttf$") or name:lower():match("%.otf$") then
+								list[#list + 1] = name
+							end
+						end
+						font_holder.refresh_options(list)
+					end
+
+					local fontSec, presetSec = column:multi_section({names = {"Fonts", "Presets"}})
+
+					font_holder = fontSec:list({flag = "lib_font_list"})
+					fontSec:button_holder({})
+					fontSec:button({name = "Apply Font", callback = function()
+						local sel = flags["lib_font_list"]
+						if not sel or sel == "" then return end
+						pcall(function()
+							local path = library.directory .. "/fonts/" .. sel
+							applyLibFont(Font.new(getcustomasset(path), Enum.FontWeight.Regular))
+						end)
+					end})
+					fontSec:button({name = "Refresh", callback = function()
+						library:font_list_update()
+					end})
+
+					presetSec:dropdown({name = "Preset", flag = "lib_font_preset",
+						items = {"Pixel (Default)", "Source Sans Pro", "Inconsolata", "Roboto Mono", "Ubuntu", "Montserrat", "Nunito"},
+						default = "Pixel (Default)",
+						callback = function(sel)
+							local presets = {
+								["Pixel (Default)"]  = defaultFont,
+								["Source Sans Pro"]  = Font.new("rbxasset://fonts/families/SourceSansPro.json"),
+								["Inconsolata"]      = Font.new("rbxasset://fonts/families/Inconsolata.json"),
+								["Roboto Mono"]      = Font.new("rbxasset://fonts/families/RobotoMono.json"),
+								["Ubuntu"]           = Font.new("rbxasset://fonts/families/Ubuntu.json"),
+								["Montserrat"]       = Font.new("rbxasset://fonts/families/Montserrat.json"),
+								["Nunito"]           = Font.new("rbxasset://fonts/families/Nunito.json"),
+							}
+							local f = presets[sel]
+							if f then pcall(applyLibFont, f) end
+						end
+					})
+			--
 					
 			-- esp preview
 				local holder = library:panel({
