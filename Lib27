@@ -1742,37 +1742,39 @@
 				end 
 
 				local column = setmetatable(items, library):column() 
-				local section = column:section({name = "Options"})
-					config_holder = section:list({flag = "config_name_list"})
-					section:textbox({flag = "config_name_text_box"})
-					section:button_holder({})
-					section:button({name = "Create", callback = function()
+				local configSec, fontSec = column:multi_section({names = {"Configs", "Fonts"}})
+
+				-- configs tab
+					config_holder = configSec:list({flag = "config_name_list"})
+					configSec:textbox({flag = "config_name_text_box"})
+					configSec:button_holder({})
+					configSec:button({name = "Create", callback = function()
 						writefile(library.directory .. "/configs/" .. flags["config_name_text_box"] .. ".cfg", library:get_config())
 						library:config_list_update()
 					end})
-					section:button({name = "Delete", callback = function()
+					configSec:button({name = "Delete", callback = function()
 						delfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg")
 						library:config_list_update()
 					end})
-					section:button_holder({})
-					section:button({name = "Load", callback = function()
+					configSec:button_holder({})
+					configSec:button({name = "Load", callback = function()
 						library:load_config(readfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg"))
 						library:notification({text = "Loaded Config: " .. flags["config_name_list"], time = 3})
 					end})
-					section:button({name = "Save", callback = function()
+					configSec:button({name = "Save", callback = function()
 						writefile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg", library:get_config())
 						library:config_list_update()
 						library:notification({text = "Saved Config: " .. flags["config_name_list"], time = 3})
 					end})
-					section:button_holder({})
-					section:button({name = "Refresh Configs", callback = function()
+					configSec:button_holder({})
+					configSec:button({name = "Refresh Configs", callback = function()
 						library:config_list_update()
 					end})
-					section:button_holder({})
-					section:button({name = "Unload Config", callback = function()
+					configSec:button_holder({})
+					configSec:button({name = "Unload Config", callback = function()
 						library:load_config(library.old_config)
 					end})
-					section:button({name = "Unload Menu", callback = function()
+					configSec:button({name = "Unload Menu", callback = function()
 						library:load_config(library.old_config)
 
 						for _, gui in library.guis do
@@ -1786,7 +1788,7 @@
 						blur:Destroy()
 					end})
 
-				-- font
+				-- fonts tab
 					local defaultFont = library.font
 					local font_holder = nil
 
@@ -1817,8 +1819,6 @@
 						font_holder.refresh_options(list)
 					end
 
-					local fontSec, presetSec = column:multi_section({names = {"Fonts", "Presets"}})
-
 					font_holder = fontSec:list({flag = "lib_font_list"})
 					fontSec:button_holder({})
 					fontSec:button({name = "Apply Font", callback = function()
@@ -1832,8 +1832,7 @@
 					fontSec:button({name = "Refresh", callback = function()
 						library:font_list_update()
 					end})
-
-					presetSec:dropdown({name = "Preset", flag = "lib_font_preset",
+					fontSec:dropdown({name = "Preset", flag = "lib_font_preset",
 						items = {"Pixel (Default)", "Source Sans Pro", "Inconsolata", "Roboto Mono", "Ubuntu", "Montserrat", "Nunito"},
 						default = "Pixel (Default)",
 						callback = function(sel)
