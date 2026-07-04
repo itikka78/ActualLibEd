@@ -3214,6 +3214,229 @@
 			return setmetatable(cfg, library)
 		end
 
+		-- SectionBar: a divider (optionally labeled) to separate groups of settings
+		-- inside a single section. Usage: section:sectionbar({name = "Targeting"})
+		function library:sectionbar(options)
+			options = options or {}
+			local named = options.name or options.text
+			local cfg = {}
+
+			local holder = library:create("Frame", {
+				Parent = self.holder,
+				Name = "",
+				BackgroundTransparency = 1,
+				Size = dim2(1, -8, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			library:create("UIListLayout", {
+				Parent = holder,
+				Padding = dim(0, 3),
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			if named then
+				local text = library:create("TextLabel", {
+					Parent = holder,
+					FontFace = library.font,
+					TextColor3 = themes.preset.text,
+					Text = named,
+					BackgroundTransparency = 1,
+					Size = dim2(1, 0, 0, 12),
+					AutomaticSize = Enum.AutomaticSize.Y,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextSize = 12,
+					BorderSizePixel = 0,
+					BackgroundColor3 = rgb(255, 255, 255)
+				}) library:apply_theme(text, "text", "TextColor3")
+
+				library:create("UIStroke", {
+					Parent = text,
+					LineJoinMode = Enum.LineJoinMode.Miter
+				})
+			end
+
+			local line = library:create("Frame", {
+				Parent = holder,
+				Name = "",
+				Size = dim2(1, 0, 0, 1),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(line, "inline", "BackgroundColor3")
+
+			return setmetatable(cfg, library)
+		end
+
+		-- Collapsible: a header button that expands to a bordered box holding a
+		-- feature's toggles/settings. Nested elements attach exactly like a section:
+		--   local sa = section:collapsible({name = "Silent Aim"})
+		--   sa:toggle({name = "Force Hit", flag = "force_hit"})
+		--   sa:dropdown({name = "Target", items = {...}})
+		function library:collapsible(options)
+			options = options or {}
+			local cfg = {
+				name = options.name or options.text or "Feature",
+				open = options.open or false,
+			}
+
+			-- outer container grows with the header + (optional) open box
+			local container = library:create("Frame", {
+				Parent = self.holder,
+				Name = "",
+				BackgroundTransparency = 1,
+				Size = dim2(1, -8, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			library:create("UIListLayout", {
+				Parent = container,
+				Padding = dim(0, 3),
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			-- header: outline -> inline, accent side bar, name + +/- arrow
+			local header = library:create("TextButton", {
+				Parent = container,
+				Name = "",
+				Text = "",
+				AutoButtonColor = false,
+				Size = dim2(1, 0, 0, 20),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.outline
+			}) library:apply_theme(header, "outline", "BackgroundColor3")
+
+			local hInline = library:create("Frame", {
+				Parent = header,
+				Name = "",
+				Position = dim2(0, 1, 0, 1),
+				Size = dim2(1, -2, 1, -2),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(hInline, "inline", "BackgroundColor3")
+
+			local accent = library:create("Frame", {
+				Parent = hInline,
+				Name = "",
+				Size = dim2(0, 2, 1, 0),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.accent
+			}) library:apply_theme(accent, "accent", "BackgroundColor3")
+
+			local hText = library:create("TextLabel", {
+				Parent = hInline,
+				FontFace = library.font,
+				TextColor3 = themes.preset.text,
+				Text = cfg.name,
+				BackgroundTransparency = 1,
+				Position = dim2(0, 7, 0, 0),
+				Size = dim2(1, -24, 1, 0),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextSize = 12,
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			}) library:apply_theme(hText, "text", "TextColor3")
+
+			library:create("UIStroke", {
+				Parent = hText,
+				LineJoinMode = Enum.LineJoinMode.Miter
+			})
+
+			local arrow = library:create("TextLabel", {
+				Parent = hInline,
+				FontFace = library.font,
+				TextColor3 = themes.preset.text,
+				Text = "+",
+				BackgroundTransparency = 1,
+				AnchorPoint = vec2(1, 0.5),
+				Position = dim2(1, -6, 0.5, 0),
+				Size = dim2(0, 10, 1, 0),
+				TextSize = 14,
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			}) library:apply_theme(arrow, "text", "TextColor3")
+
+			-- content box: accent border (1px UIPadding) -> contrast body -> elements
+			local box = library:create("Frame", {
+				Parent = container,
+				Name = "",
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				Visible = cfg.open,
+				BackgroundColor3 = themes.preset.accent
+			}) library:apply_theme(box, "accent", "BackgroundColor3")
+
+			library:create("UIPadding", {
+				Parent = box,
+				PaddingLeft = dim(0, 1),
+				PaddingRight = dim(0, 1),
+				PaddingTop = dim(0, 1),
+				PaddingBottom = dim(0, 1)
+			})
+
+			local bg = library:create("Frame", {
+				Parent = box,
+				Name = "",
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			local grad = library:create("UIGradient", {
+				Parent = bg,
+				Rotation = 90,
+				Color = rgbseq{
+					rgbkey(0, rgb(41, 41, 55)),
+					rgbkey(1, rgb(35, 35, 47))
+				}
+			}) library:apply_theme(grad, "contrast", "Color")
+
+			-- inner holder nested elements attach to (via self.holder)
+			local elements = library:create("Frame", {
+				Parent = bg,
+				Name = "",
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundTransparency = 1,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			library:create("UIListLayout", {
+				Parent = elements,
+				Padding = dim(0, 4),
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			library:create("UIPadding", {
+				Parent = elements,
+				PaddingTop = dim(0, 5),
+				PaddingBottom = dim(0, 5)
+			})
+
+			cfg.holder = elements
+			cfg.current_holder = elements
+
+			function cfg.set_open(v)
+				cfg.open = v and true or false
+				box.Visible = cfg.open
+				arrow.Text = cfg.open and "-" or "+"
+			end
+			cfg.set_open(cfg.open)
+
+			header.MouseButton1Click:Connect(function()
+				cfg.set_open(not cfg.open)
+			end)
+
+			return setmetatable(cfg, library)
+		end
+
 		function library:slider(options)
 			local cfg = {
 				name = options.name or nil,
