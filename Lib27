@@ -3298,7 +3298,8 @@
 				SortOrder = Enum.SortOrder.LayoutOrder
 			})
 
-			-- header: outline -> inline, accent side bar, name + +/- arrow
+			-- header styled like the text inputs: outline -> inline -> contrast
+			-- gradient body, plus an accent side bar, the name and a +/- arrow
 			local header = library:create("TextButton", {
 				Parent = container,
 				Name = "",
@@ -3312,22 +3313,44 @@
 			local hInline = library:create("Frame", {
 				Parent = header,
 				Name = "",
+				ZIndex = 2,
 				Position = dim2(0, 1, 0, 1),
 				Size = dim2(1, -2, 1, -2),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
 			}) library:apply_theme(hInline, "inline", "BackgroundColor3")
 
-			local accent = library:create("Frame", {
+			local hBody = library:create("Frame", {
 				Parent = hInline,
 				Name = "",
+				ZIndex = 2,
+				Position = dim2(0, 1, 0, 1),
+				Size = dim2(1, -2, 1, -2),
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			local hGrad = library:create("UIGradient", {
+				Parent = hBody,
+				Rotation = 90,
+				Color = rgbseq{
+					rgbkey(0, rgb(41, 41, 55)),
+					rgbkey(1, rgb(35, 35, 47))
+				}
+			}) library:apply_theme(hGrad, "contrast", "Color")
+
+			local accent = library:create("Frame", {
+				Parent = hBody,
+				Name = "",
+				ZIndex = 3,
 				Size = dim2(0, 2, 1, 0),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.accent
 			}) library:apply_theme(accent, "accent", "BackgroundColor3")
 
 			local hText = library:create("TextLabel", {
-				Parent = hInline,
+				Parent = hBody,
+				ZIndex = 3,
 				FontFace = library.font,
 				TextColor3 = themes.preset.text,
 				Text = cfg.name,
@@ -3346,7 +3369,8 @@
 			})
 
 			local arrow = library:create("TextLabel", {
-				Parent = hInline,
+				Parent = hBody,
+				ZIndex = 3,
 				FontFace = library.font,
 				TextColor3 = themes.preset.text,
 				Text = "+",
