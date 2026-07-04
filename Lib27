@@ -3383,7 +3383,9 @@
 				BackgroundColor3 = rgb(255, 255, 255)
 			}) library:apply_theme(arrow, "text", "TextColor3")
 
-			-- content box: accent border (1px UIPadding) -> contrast body -> elements
+			-- content box mirrors the header exactly (outline -> inline -> gradient
+			-- body) so its left edge lines up with the header; the accent shows ONLY
+			-- as a left bar sitting at the same x as the header's accent bar.
 			local box = library:create("Frame", {
 				Parent = container,
 				Name = "",
@@ -3391,8 +3393,8 @@
 				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				Visible = cfg.open,
-				BackgroundColor3 = themes.preset.accent
-			}) library:apply_theme(box, "accent", "BackgroundColor3")
+				BackgroundColor3 = themes.preset.outline
+			}) library:apply_theme(box, "outline", "BackgroundColor3")
 
 			library:create("UIPadding", {
 				Parent = box,
@@ -3402,8 +3404,25 @@
 				PaddingBottom = dim(0, 1)
 			})
 
-			local bg = library:create("Frame", {
+			local bInline = library:create("Frame", {
 				Parent = box,
+				Name = "",
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(bInline, "inline", "BackgroundColor3")
+
+			library:create("UIPadding", {
+				Parent = bInline,
+				PaddingLeft = dim(0, 1),
+				PaddingRight = dim(0, 1),
+				PaddingTop = dim(0, 1),
+				PaddingBottom = dim(0, 1)
+			})
+
+			local bg = library:create("Frame", {
+				Parent = bInline,
 				Name = "",
 				Size = dim2(1, 0, 0, 0),
 				AutomaticSize = Enum.AutomaticSize.Y,
@@ -3419,6 +3438,17 @@
 					rgbkey(1, rgb(35, 35, 47))
 				}
 			}) library:apply_theme(grad, "contrast", "Color")
+
+			-- left accent bar only (same 2px width and x-offset as the header's) so it
+			-- lines up with the header bar into one continuous line
+			local boxAccent = library:create("Frame", {
+				Parent = bg,
+				Name = "",
+				ZIndex = 3,
+				Size = dim2(0, 2, 1, 0),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.accent
+			}) library:apply_theme(boxAccent, "accent", "BackgroundColor3")
 
 			-- inner holder nested elements attach to (via self.holder)
 			local elements = library:create("Frame", {
@@ -3440,6 +3470,7 @@
 
 			library:create("UIPadding", {
 				Parent = elements,
+				PaddingLeft = dim(0, 5),
 				PaddingTop = dim(0, 5),
 				PaddingBottom = dim(0, 5)
 			})
