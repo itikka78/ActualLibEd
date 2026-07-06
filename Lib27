@@ -67,7 +67,7 @@
 
 -- library init
 	local library = {
-		directory = "Atlanta",
+		directory = "Fem.Hook",
 		folders = {
 			"/fonts",
 			"/configs",
