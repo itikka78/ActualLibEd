@@ -1631,11 +1631,11 @@
 					image = "rbxassetid://115194686863276",
 				})
 
-				local watermark = library:watermark({default = os.date('Femboy.Hook |  - %b %d %Y - %H:%M:%S')})  
+				local watermark = library:watermark({default = os.date('Atlanta |  - %b %d %Y - %H:%M:%S')})  
 
 				task.spawn(function()
 					while task.wait(1) do 
-						watermark.change_text(os.date('Femboy.Hook - Beta - %b %d %Y - %H:%M:%S'))
+						watermark.change_text(os.date('Atlanta - Beta - %b %d %Y - %H:%M:%S'))
 					end 
 				end) 
 
@@ -1997,7 +1997,7 @@
 				FontFace = library.font,
 				TextColor3 = themes.preset.text,
 				BorderColor3 = rgb(0, 0, 0),
-				Text = "  Fem.Hook | Beta | Aug 29 2024 | 07:29:00  ",
+				Text = "  drain.lol | Beta | Aug 29 2024 | 07:29:00  ",
 				Size = dim2(0, 0, 1, 0),
 				BackgroundTransparency = 1,
 				Position = dim2(0, -1, 0, 1),
@@ -6038,7 +6038,7 @@
 
 			local list = library:create("UIListLayout", {
 				Parent = right_components,
-				Verticlignment = Enum.VerticalAlignment.Center,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
 				FillDirection = Enum.FillDirection.Horizontal,
 				HorizontalAlignment = Enum.HorizontalAlignment.Right,
 				Padding = dim(0, 4),
