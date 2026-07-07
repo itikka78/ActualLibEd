@@ -67,7 +67,7 @@
 
 -- library init
 	local library = {
-		directory = "Fem.Hook",
+		directory = "Atlanta",
 		folders = {
 			"/fonts",
 			"/configs",
@@ -1631,11 +1631,11 @@
 					image = "rbxassetid://115194686863276",
 				})
 
-				local watermark = library:watermark({default = os.date('Test |  - %b %d %Y - %H:%M:%S')})  
+				local watermark = library:watermark({default = os.date('Atlanta |  - %b %d %Y - %H:%M:%S')})  
 
 				task.spawn(function()
 					while task.wait(1) do 
-						watermark.change_text(os.date('Test - Beta - %b %d %Y - %H:%M:%S'))
+						watermark.change_text(os.date('Atlanta - Beta - %b %d %Y - %H:%M:%S'))
 					end 
 				end) 
 
@@ -3488,6 +3488,231 @@
 			header.MouseButton1Click:Connect(function()
 				cfg.set_open(not cfg.open)
 			end)
+
+			return setmetatable(cfg, library)
+		end
+
+		function library:embedded_box(options)
+			options = options or {}
+			local cfg = {
+				name = options.name or nil,
+				height = options.height or 100,
+			}
+
+			-- inset box: outline -> inline -> gradient body (same lining as the
+			-- collapsible content box) so it sits flush inside any section
+			local box = library:create("Frame", {
+				Parent = self.holder,
+				Name = "",
+				Size = dim2(1, -8, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.outline
+			}) library:apply_theme(box, "outline", "BackgroundColor3")
+
+			library:create("UIPadding", {
+				Parent = box,
+				PaddingLeft = dim(0, 1),
+				PaddingRight = dim(0, 1),
+				PaddingTop = dim(0, 1),
+				PaddingBottom = dim(0, 1)
+			})
+
+			local bInline = library:create("Frame", {
+				Parent = box,
+				Name = "",
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(bInline, "inline", "BackgroundColor3")
+
+			library:create("UIPadding", {
+				Parent = bInline,
+				PaddingLeft = dim(0, 1),
+				PaddingRight = dim(0, 1),
+				PaddingTop = dim(0, 1),
+				PaddingBottom = dim(0, 1)
+			})
+
+			local bg = library:create("Frame", {
+				Parent = bInline,
+				Name = "",
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			local grad = library:create("UIGradient", {
+				Parent = bg,
+				Rotation = 90,
+				Color = rgbseq{
+					rgbkey(0, rgb(41, 41, 55)),
+					rgbkey(1, rgb(35, 35, 47))
+				}
+			}) library:apply_theme(grad, "contrast", "Color")
+
+			library:create("UIListLayout", {
+				Parent = bg,
+				Padding = dim(0, 4),
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			library:create("UIPadding", {
+				Parent = bg,
+				PaddingLeft = dim(0, 6),
+				PaddingRight = dim(0, 6),
+				PaddingTop = dim(0, 5),
+				PaddingBottom = dim(0, 6)
+			})
+
+			-- optional small uppercase title (e.g. "SKIN PREVIEW")
+			if cfg.name then
+				local title = library:create("TextLabel", {
+					Parent = bg,
+					LayoutOrder = 1,
+					FontFace = library.font,
+					TextColor3 = themes.preset.text,
+					Text = string.upper(cfg.name),
+					BackgroundTransparency = 1,
+					Size = dim2(1, 0, 0, 12),
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextSize = 12,
+					BorderSizePixel = 0,
+					BackgroundColor3 = rgb(255, 255, 255)
+				}) library:apply_theme(title, "text", "TextColor3")
+
+				library:create("UIStroke", {
+					Parent = title,
+					LineJoinMode = Enum.LineJoinMode.Miter
+				})
+			end
+
+			-- image preview area, fed via cfg.set_image (keeps aspect via Fit)
+			local preview = library:create("ImageLabel", {
+				Parent = bg,
+				Name = "",
+				LayoutOrder = 2,
+				BackgroundTransparency = 1,
+				Size = dim2(1, 0, 0, cfg.height),
+				ScaleType = Enum.ScaleType.Fit,
+				BorderSizePixel = 0,
+				Image = "",
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			-- centered caption under the preview (e.g. the skin's display name),
+			-- hidden while empty; recolorable for rarity tinting
+			local caption = library:create("TextLabel", {
+				Parent = bg,
+				Name = "",
+				LayoutOrder = 3,
+				FontFace = library.font,
+				TextColor3 = themes.preset.text,
+				Text = "",
+				Visible = false,
+				BackgroundTransparency = 1,
+				Size = dim2(1, 0, 0, 12),
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextSize = 12,
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			library:create("UIStroke", {
+				Parent = caption,
+				LineJoinMode = Enum.LineJoinMode.Miter
+			})
+
+			-- elements holder under the preview (dropdowns etc. attach here)
+			local elements = library:create("Frame", {
+				Parent = bg,
+				Name = "",
+				LayoutOrder = 4,
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundTransparency = 1,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			library:create("UIListLayout", {
+				Parent = elements,
+				Padding = dim(0, 4),
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			cfg.image = preview
+			cfg.caption = caption
+			cfg.holder = elements
+			cfg.current_holder = elements
+
+			function cfg.set_image(id)
+				preview.Image = (id and id ~= "" and tostring(id)) or ""
+			end
+
+			function cfg.set_caption(text, color)
+				caption.Text = text or ""
+				caption.Visible = caption.Text ~= ""
+				if color then caption.TextColor3 = color end
+			end
+
+			function cfg.set_preview_visible(v)
+				preview.Visible = v and true or false
+				preview.Size = dim2(1, 0, 0, v and cfg.height or 0)
+			end
+
+			return setmetatable(cfg, library)
+		end
+
+		function library:indent_group(options)
+			options = options or {}
+			local cfg = {}
+
+			-- transparent wrapper that draws the nested-indent guide line and
+			-- insets its children; reusable anywhere an element should look nested
+			local wrap = library:create("Frame", {
+				Parent = self.holder,
+				Name = "",
+				Size = dim2(1, -8, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundTransparency = 1,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			-- vertical guide rail on the left, mimicking an indent line
+			local rail = library:create("Frame", {
+				Parent = wrap,
+				Name = "",
+				Position = dim2(0, 5, 0, 0),
+				Size = dim2(0, 1, 1, -6),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(rail, "inline", "BackgroundColor3")
+
+			local elements = library:create("Frame", {
+				Parent = wrap,
+				Name = "",
+				Position = dim2(0, 14, 0, 0),
+				Size = dim2(1, -14, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundTransparency = 1,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			library:create("UIListLayout", {
+				Parent = elements,
+				Padding = dim(0, 4),
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			cfg.holder = elements
+			cfg.current_holder = elements
 
 			return setmetatable(cfg, library)
 		end
