@@ -1635,7 +1635,7 @@
 
 				task.spawn(function()
 					while task.wait(1) do 
-						watermark.change_text(os.date('Fem.Hook - Beta - %b %d %Y - %H:%M:%S'))
+						watermark.change_text(os.date('Fem.Hook - Tester - %b %d %Y - %H:%M:%S'))
 					end 
 				end) 
 
@@ -1997,7 +1997,7 @@
 				FontFace = library.font,
 				TextColor3 = themes.preset.text,
 				BorderColor3 = rgb(0, 0, 0),
-				Text = "  drain.lol | Beta | Aug 29 2024 | 07:29:00  ",
+				Text = "  drain.lol | Tester | Aug 29 2024 | 07:29:00  ",
 				Size = dim2(0, 0, 1, 0),
 				BackgroundTransparency = 1,
 				Position = dim2(0, -1, 0, 1),
@@ -4166,6 +4166,163 @@
 			return setmetatable(cfg, library)
 		end
 		
+		-- library:plus — a small "+" on a toggle's right side that opens a floating
+		-- popup holding extra sub-options. Chain it off a toggle; the returned object's
+		-- :toggle/:slider/:dropdown/etc. add INTO the popup:
+		--   someToggle:plus({name = "Options"})
+		--       :toggle({name = "Sound",  flag = "opt_sound"})
+		--       :slider({name = "Volume", flag = "opt_vol", min = 0, max = 10})
+		function library:plus(options)
+			local parent = self.right_holder
+
+			local cfg = {
+				name = (options and options.name) or "Options",
+				open = false,
+			}
+
+			-- the little "+" button (sits in the toggle's right-aligned component list)
+			local plus_button = library:create("TextButton", {
+				Parent = parent,
+				Name = "plus",
+				Text = "",
+				AutoButtonColor = false,
+				BorderColor3 = rgb(0, 0, 0),
+				Size = dim2(0, 14, 0, 14),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.outline,
+			}) library:apply_theme(plus_button, "outline", "BackgroundColor3")
+
+			local plus_inline = library:create("Frame", {
+				Parent = plus_button,
+				Name = "inline",
+				ZIndex = 1,
+				Position = dim2(0, 1, 0, 1),
+				BorderColor3 = rgb(0, 0, 0),
+				Size = dim2(1, -2, 1, -2),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline,
+			}) library:apply_theme(plus_inline, "inline", "BackgroundColor3")
+
+			library:create("TextLabel", {
+				Parent = plus_button,
+				FontFace = library.font,
+				Text = "+",
+				TextSize = 12,
+				TextColor3 = themes.preset.text,
+				BackgroundTransparency = 1,
+				Size = dim2(1, 0, 1, -1),
+				ZIndex = 3,
+				BorderSizePixel = 0,
+			})
+
+			library:hoverify(plus_button, plus_button)
+
+			-- floating popup window (parented to the ScreenGui, like the colorpicker)
+			local window = library:create("Frame", {
+				Parent = sgui,
+				Name = "plus_window",
+				Position = dim2(0, 0, 0, 0),
+				BorderColor3 = rgb(0, 0, 0),
+				Size = dim2(0, 190, 0, 150),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.outline,
+				Visible = false,
+				ZIndex = 1,
+			}) library:apply_theme(window, "outline", "BackgroundColor3")
+
+			library:make_resizable(window)
+
+			local window_inline = library:create("Frame", {
+				Parent = window,
+				Name = "window_inline",
+				Position = dim2(0, 1, 0, 1),
+				BorderColor3 = rgb(0, 0, 0),
+				Size = dim2(1, -2, 1, -2),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.accent,
+			}) library:apply_theme(window_inline, "accent", "BackgroundColor3")
+
+			local window_holder = library:create("Frame", {
+				Parent = window_inline,
+				Name = "window_holder",
+				Position = dim2(0, 1, 0, 1),
+				BorderColor3 = rgb(0, 0, 0),
+				Size = dim2(1, -2, 1, -2),
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255),
+			})
+
+			local UIGradient = library:create("UIGradient", {
+				Parent = window_holder,
+				Rotation = 90,
+				Name = "_",
+				Color = rgbseq{
+					rgbkey(0, rgb(41, 41, 55)),
+					rgbkey(1, rgb(35, 35, 47))
+				}
+			}) library:apply_theme(UIGradient, "contrast", "Color")
+
+			local title = library:create("TextLabel", {
+				Parent = window_holder,
+				FontFace = library.font,
+				TextColor3 = themes.preset.text,
+				BorderColor3 = rgb(0, 0, 0),
+				Text = cfg.name,
+				Name = "text",
+				BackgroundTransparency = 1,
+				Position = dim2(0, 6, 0, 4),
+				Size = dim2(1, -12, 0, 12),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				BorderSizePixel = 0,
+				TextSize = 12,
+			})
+			library:create("UIStroke", { Parent = title, LineJoinMode = Enum.LineJoinMode.Miter })
+
+			-- content holder that sub-elements (:toggle/:slider/...) parent into
+			cfg.holder = library:create("Frame", {
+				Parent = window_holder,
+				Name = "content",
+				Position = dim2(0, 0, 0, 20),
+				Size = dim2(1, 0, 1, -20),
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+			})
+			library:create("UIListLayout", {
+				Parent = cfg.holder,
+				Padding = dim(0, 6),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			})
+			library:create("UIPadding", {
+				Parent = cfg.holder,
+				Name = "_",
+				PaddingTop = dim(0, 2),
+				PaddingBottom = dim(0, 6),
+				PaddingLeft = dim(0, 6),
+				PaddingRight = dim(0, 6),
+			})
+
+			function cfg.set_visible(bool)
+				window.Visible = bool
+				if bool then
+					if library.current_element_open and library.current_element_open ~= cfg then
+						library.current_element_open.set_visible(false)
+						library.current_element_open.open = false
+					end
+					library.current_element_open = cfg
+					-- open just below the "+", nudged left so the panel stays on screen
+					window.Position = dim2(0, plus_button.AbsolutePosition.X - window.AbsoluteSize.X + 14, 0, plus_button.AbsolutePosition.Y + 17)
+				end
+			end
+
+			library:connection(plus_button.MouseButton1Click, function()
+				cfg.open = not cfg.open
+				cfg.set_visible(cfg.open)
+			end)
+
+			return setmetatable(cfg, library)
+		end
+
 		function library:colorpicker(options)
 			local parent = self.right_holder
 			
@@ -5174,10 +5331,11 @@
 				multi = options.multi or false, 
 				visible = options.visible or true,
 
-				open = false, 
-				option_instances = {}, 
-				multi_items = {}, 
-				scrolling = options.scrolling or false, 
+				open = false,
+				option_instances = {},
+				multi_items = {},
+				-- auto-scroll long lists (huge item catalogs would overflow the screen)
+				scrolling = options.scrolling or (options.items and #options.items > 14) or false,
 				ignore = options.ignore or nil,
 			}
 
