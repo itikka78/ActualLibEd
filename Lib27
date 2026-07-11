@@ -651,9 +651,6 @@
 
 				-- button
 				image = options.image or "rbxassetid://79856374238119",
-				-- optional logo shown at the LEFT of the title bar; when set the bar grows
-				-- taller to fit it (and to just make the bar a touch bigger)
-				logo = options.logo,
 				open = options.open or true,
 
 				-- ignore
@@ -747,28 +744,6 @@
 		
 					library:apply_theme(items.UIGradient, "contrast", "Color") 
 					
-					-- title bar height: a bit taller when a logo is present so the logo fits
-					-- (also just makes the bar slightly bigger)
-					local bar_h  = cfg.logo and 26 or 18
-					local text_x = 2
-					if cfg.logo then
-						local logo_sz = bar_h - 8
-						items.logo = library:create("ImageLabel", {
-							Parent = items.window_holder,
-							Name = "",
-							Image = cfg.logo,
-							BackgroundTransparency = 1,
-							BorderColor3 = rgb(0, 0, 0),
-							BorderSizePixel = 0,
-							ScaleType = Enum.ScaleType.Fit,   -- keep the logo's aspect ratio
-							Position = dim2(0, 2, 0, math.floor((bar_h - logo_sz) / 2)),
-							Size = dim2(0, logo_sz, 0, logo_sz),
-							ZIndex = 3,
-							BackgroundColor3 = rgb(255, 255, 255)
-						})
-						text_x = 2 + logo_sz + 4   -- push the title right of the logo
-					end
-
 					items.text = library:create("TextLabel", {
 						Parent = items.window_holder,
 						Name = "",
@@ -777,7 +752,7 @@
 						BorderColor3 = rgb(0, 0, 0),
 						Text = cfg.name,
 						BackgroundTransparency = 1,
-						Position = dim2(0, text_x, 0, math.floor((bar_h - 14) / 2)),
+						Position = dim2(0, 2, 0, 4),
 						BorderSizePixel = 0,
 						AutomaticSize = Enum.AutomaticSize.XY,
 						TextSize = 12,
@@ -801,9 +776,9 @@
 					items.outline = library:create("Frame", {
 						Parent = items.window_holder,
 						Name = "",
-						Position = dim2(0, 0, 0, bar_h),
+						Position = dim2(0, 0, 0, 18),
 						BorderColor3 = rgb(0, 0, 0),
-						Size = dim2(1, 0, 1, -bar_h),
+						Size = dim2(1, 0, 1, -18),
 						BorderSizePixel = 0,
 						BackgroundColor3 = themes.preset.inline
 					})
@@ -1554,10 +1529,7 @@
 					name = properties and properties.name or "Fem.Hook | ",
 					size = dim2(0, 604, 0, 628),
 					position = dim2(0, (camera.ViewportSize.X / 2) - 302 - 96, 0, (camera.ViewportSize.Y / 2) - 421 - 12),
-					image = "rbxassetid://128669344549153",
-					-- logo shown at the left of the main window's title bar; override via
-					-- library:window({ logo = "rbxassetid://..." })
-					logo = (properties and properties.logo) or "rbxassetid://128669344549153",
+					image = "rbxassetid://98823308062942",
 				})
 
 				local items = main_window.items
@@ -1972,7 +1944,10 @@
 
 		function library:watermark(options) 
 			local cfg = {
-				default = options.text or options.default or os.date('drain.lol | %b %d %Y | %H:%M')
+				default = options.text or options.default or os.date('drain.lol | %b %d %Y | %H:%M'),
+				-- little logo shown at the START of the watermark bar (override via
+				-- library:watermark({ logo = "rbxassetid://..." }))
+				logo = options.logo or "rbxassetid://128669344549153",
 			}
 
 			local watermark_outline = library:create("Frame", {
@@ -2019,6 +1994,22 @@
 				}
 			}) library:apply_theme(UIGradient, "contrast", "Color") 
 			
+			-- little logo at the start of the watermark; the text is pushed right of it
+			local logo = library:create("ImageLabel", {
+				Parent = watermark_background,
+				Name = "",
+				Image = cfg.logo,
+				BackgroundTransparency = 1,
+				BorderColor3 = rgb(0, 0, 0),
+				BorderSizePixel = 0,
+				ScaleType = Enum.ScaleType.Fit,   -- keep the logo's aspect ratio
+				AnchorPoint = vec2(0, 0.5),
+				Position = dim2(0, 4, 0.5, 0),
+				Size = dim2(0, 14, 0, 14),
+				ZIndex = 2,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
 			local text = library:create("TextLabel", {
 				Parent = watermark_background,
 				Name = "",
@@ -2028,7 +2019,7 @@
 				Text = "  drain.lol | Tester | Aug 29 2024 | 07:29:00  ",
 				Size = dim2(0, 0, 1, 0),
 				BackgroundTransparency = 1,
-				Position = dim2(0, -1, 0, 1),
+				Position = dim2(0, 18, 0, 1),
 				BorderSizePixel = 0,
 				AutomaticSize = Enum.AutomaticSize.X,
 				TextSize = 12,
@@ -2593,7 +2584,7 @@
 
 		function library:refresh_notifications()  	
 			for _, notif in next, library.notifications do
-				tween_service:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Exponential, Enum.EasingDirection.InOut), {Position = dim2(0, 20, 0, 72 + (_ * 34))}):Play()
+				tween_service:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Exponential, Enum.EasingDirection.InOut), {Position = dim2(0, 20, 0, 72 + (_ * 30))}):Play()
 			end
 		end
 
@@ -2608,10 +2599,10 @@
 				local watermark_outline = library:create("Frame", {
 					Parent = notif_holder,
 					Name = "",
-					Size = UDim2.new(0, 0, 0, 30),
+					Size = UDim2.new(0, 0, 0, 26),
 					BorderColor3 = rgb(0, 0, 0),
 					BorderSizePixel = 0,
-					Position = UDim2.new(0, 20, 0, 72 + (#library.notifications * 34)),
+					Position = UDim2.new(0, 20, 0, 72 + (#library.notifications * 30)),
 					AutomaticSize = Enum.AutomaticSize.X,
 					BackgroundColor3 = themes.preset.outline,
 					AnchorPoint = Vector2.new(1, 0)
