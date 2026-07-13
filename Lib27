@@ -3288,6 +3288,39 @@
 			return setmetatable(cfg, library)
 		end
 
+		-- Separator: a plain full-width gray divider line (no label) for visually
+		-- grouping elements inside a section, collapsible or a :plus() popup. Optional
+		-- `padding` = vertical breathing room above+below the line (default 4px). Use
+		-- sectionbar instead when you want a titled divider.
+		--   section:separator({})            -- default spacing
+		--   section:separator({padding = 8}) -- more space around the line
+		function library:separator(options)
+			options = options or {}
+			local cfg = {}
+			local pad = options.padding or 4
+
+			local holder = library:create("Frame", {
+				Parent = self.holder,
+				Name = "",
+				BackgroundTransparency = 1,
+				Size = dim2(1, -8, 0, pad * 2 + 1),
+				BorderSizePixel = 0,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			local line = library:create("Frame", {
+				Parent = holder,
+				Name = "",
+				AnchorPoint = vec2(0, 0.5),
+				Position = dim2(0, 0, 0.5, 0),
+				Size = dim2(1, 0, 0, 1),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(line, "inline", "BackgroundColor3")
+
+			return setmetatable(cfg, library)
+		end
+
 		-- Collapsible: a header button that expands to a bordered box holding a
 		-- feature's toggles/settings. Nested elements attach exactly like a section:
 		--   local sa = section:collapsible({name = "Silent Aim"})
