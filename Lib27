@@ -4323,6 +4323,7 @@
 				BorderColor3 = rgb(0, 0, 0),
 				Size = dim2(1, -2, 1, -2),
 				BorderSizePixel = 0,
+				ClipsDescendants = true,   -- keep content inside the popup border
 				BackgroundColor3 = rgb(255, 255, 255),
 			})
 
@@ -4352,15 +4353,29 @@
 			})
 			library:create("UIStroke", { Parent = title, LineJoinMode = Enum.LineJoinMode.Miter })
 
-			-- content holder that sub-elements (:toggle/:slider/...) parent into
-			cfg.holder = library:create("Frame", {
+			-- content holder that sub-elements (:toggle/:slider/...) parent into.
+			-- A ScrollingFrame so a popup with more elements than fit CLIPS + SCROLLS
+			-- instead of spilling its sliders out over the rest of the UI. The canvas
+			-- auto-grows to the UIListLayout's content height; the scrollbar only shows
+			-- when there's overflow.
+			cfg.holder = library:create("ScrollingFrame", {
 				Parent = window_holder,
 				Name = "content",
 				Position = dim2(0, 0, 0, 20),
 				Size = dim2(1, 0, 1, -20),
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
+				ClipsDescendants = true,
+				Active = true,
+				ScrollingDirection = Enum.ScrollingDirection.Y,
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				CanvasSize = dim2(0, 0, 0, 0),
+				ScrollBarThickness = 3,
+				ScrollBarImageColor3 = themes.preset.accent,
+				ScrollBarImageTransparency = 0.2,
+				VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			})
+			library:apply_theme(cfg.holder, "accent", "ScrollBarImageColor3")
 			library:create("UIListLayout", {
 				Parent = cfg.holder,
 				Padding = dim(0, 6),
