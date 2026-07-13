@@ -4275,7 +4275,9 @@
 				Name = "plus_window",
 				Position = dim2(0, 0, 0, 0),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(0, 190, 0, 150),
+				-- default 190x150; callers can pass options.width / options.height to make
+				-- a taller/wider popup for elements with many sub-settings
+				Size = dim2(0, (options and options.width) or 190, 0, (options and options.height) or 150),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.outline,
 				Visible = false,
