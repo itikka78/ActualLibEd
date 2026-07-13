@@ -4376,7 +4376,7 @@
 				VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			})
 			library:apply_theme(cfg.holder, "accent", "ScrollBarImageColor3")
-			library:create("UIListLayout", {
+			local content_layout = library:create("UIListLayout", {
 				Parent = cfg.holder,
 				Padding = dim(0, 6),
 				SortOrder = Enum.SortOrder.LayoutOrder,
@@ -4390,6 +4390,24 @@
 				PaddingLeft = dim(0, 6),
 				PaddingRight = dim(0, 6),
 			})
+
+			-- Auto-fit the popup height to its content so every popup is exactly as tall
+			-- as it needs (a 1-slider popup is short, a big one caps out and scrolls) —
+			-- no more arbitrary per-popup heights. options.height forces a fixed height;
+			-- options.max_height caps the auto-fit (default 240).
+			do
+				local TITLE_H = 20   -- title bar
+				local PAD_V   = 8    -- content top+bottom UIPadding
+				local max_h   = (options and options.max_height) or 240
+				local width   = (options and options.width) or 190
+				local function fit_height()
+					if options and options.height then return end   -- fixed height requested
+					local h = library:round(content_layout.AbsoluteContentSize.Y + PAD_V + TITLE_H)
+					window.Size = dim2(0, width, 0, math.clamp(h, 34, max_h))
+				end
+				library:connection(content_layout:GetPropertyChangedSignal("AbsoluteContentSize"), fit_height)
+				fit_height()
+			end
 
 			function cfg.set_visible(bool)
 				window.Visible = bool
