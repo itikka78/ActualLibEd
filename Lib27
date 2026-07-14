@@ -287,6 +287,22 @@
 			end 
 		end  
 
+		-- ── shared drag dispatcher ─────────────────────────────────────────────
+		-- Sliders, colorpickers, draggable frames and resizable windows used to each
+		-- register their OWN global InputChanged/InputEnded connection — hundreds of
+		-- handlers fired on EVERY mouse movement with a full menu. Instead, an element
+		-- sets library.active_drag = fn(input) on its mouse-down; these TWO connections
+		-- forward mouse moves to it and clear it on release. (Raw :Connect + manual
+		-- insert because library:connection is defined further down this file.)
+		library.active_drag = nil
+		insert(library.connections, uis.InputChanged:Connect(function(input)
+			local h = library.active_drag
+			if h and input.UserInputType == Enum.UserInputType.MouseMovement then h(input) end
+		end))
+		insert(library.connections, uis.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then library.active_drag = nil end
+		end))
+
 		function library:make_resizable(frame) 
 			local Frame = Instance.new("TextButton")
 			Frame.Position = dim2(1, -10, 1, -10)
@@ -298,100 +314,60 @@
 			Frame.BackgroundTransparency = 1 
 			Frame.Text = ""
 
-			local resizing = false 
-			local start_size 
-			local start 
-			local og_size = frame.Size  
+			local start_size
+			local start
+			local og_size = frame.Size
 
 			Frame.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					resizing = true
 					start = input.Position
 					start_size = frame.Size
-				end
-			end)
-
-			Frame.InputEnded:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					resizing = false
-				end
-			end)
-
-			library:connection(uis.InputChanged, function(input, game_event) 
-				if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
-					local viewport_x = camera.ViewportSize.X
-					local viewport_y = camera.ViewportSize.Y
-
-					local current_size = dim2(
-						start_size.X.Scale,
-						math.clamp(
-							start_size.X.Offset + (input.Position.X - start.X),
-							og_size.X.Offset,
-							viewport_x
-						),
-						start_size.Y.Scale,
-						math.clamp(
-							start_size.Y.Offset + (input.Position.Y - start.Y),
-							og_size.Y.Offset,
-							viewport_y
+					-- resize via the ONE shared dispatcher (was a global InputChanged per window)
+					library.active_drag = function(inp)
+						local viewport_x = camera.ViewportSize.X
+						local viewport_y = camera.ViewportSize.Y
+						frame.Size = dim2(
+							start_size.X.Scale,
+							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), og_size.X.Offset, viewport_x),
+							start_size.Y.Scale,
+							math.clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), og_size.Y.Offset, viewport_y)
 						)
-					)
-					frame.Size = current_size
+					end
 				end
 			end)
 		end
 
 		function library:draggify(frame)
-			local dragging = false 
 			local start_size = frame.Position
-			local start 
+			local start
 
 			frame.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					dragging = true
 					start = input.Position
 					start_size = frame.Position
 
-					if library.current_element_open then 
+					if library.current_element_open then
 						library.current_element_open.set_visible(false)
-						library.current_element_open.open = false 
-						library.current_element_open = nil 
-					end 
+						library.current_element_open.open = false
+						library.current_element_open = nil
+					end
 
-					if frame.Parent:IsA("ScreenGui") and frame.Parent.DisplayOrder ~= 999999 then 
+					if frame.Parent:IsA("ScreenGui") and frame.Parent.DisplayOrder ~= 999999 then
 						library.display_orders += 1 -- shit code
 						frame.Parent.DisplayOrder = library.display_orders
-					end   
-				end
-			end)
+					end
 
-			frame.InputEnded:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					dragging = false
-				end
-			end)
-
-			library:connection(uis.InputChanged, function(input, game_event) 
-				if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-					local viewport_x = camera.ViewportSize.X
-					local viewport_y = camera.ViewportSize.Y
-
-					local current_position = dim2(
-						0,
-						clamp(
-							start_size.X.Offset + (input.Position.X - start.X),
+					-- drag via the ONE shared dispatcher (was a global InputChanged per frame)
+					library.active_drag = function(inp)
+						local viewport_x = camera.ViewportSize.X
+						local viewport_y = camera.ViewportSize.Y
+						frame.Position = dim2(
 							0,
-							viewport_x - frame.Size.X.Offset
-						),
-						0,
-						clamp(
-							start_size.Y.Offset + (input.Position.Y - start.Y),
+							clamp(start_size.X.Offset + (inp.Position.X - start.X), 0, viewport_x - frame.Size.X.Offset),
 							0,
-							viewport_y - frame.Size.Y.Offset
+							clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), 0, viewport_y - frame.Size.Y.Offset)
 						)
-					)
-
-					frame.Position = current_position
+					end
 				end
 			end)
 		end
@@ -3984,23 +3960,14 @@
 				end 
 			end
 
-			if not cfg.input_disabled then 
-				library:connection(uis.InputChanged, function(input)
-					if cfg.dragging and input.UserInputType == Enum.UserInputType.MouseMovement then 
-						local size_x = (input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X
-						local value = ((cfg.max - cfg.min) * size_x) + cfg.min
-						cfg.set(value)
-					end
-				end)
-
-				library:connection(uis.InputEnded, function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 then
-						cfg.dragging = false 
-					end 
-				end)
-
+			if not cfg.input_disabled then
+				-- drag routes through the ONE shared dispatcher (was 2 global input
+				-- connections created PER slider — hundreds with a full menu)
 				slider.MouseButton1Down:Connect(function()
-					cfg.dragging = true
+					library.active_drag = function(input)
+						local size_x = (input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X
+						cfg.set(((cfg.max - cfg.min) * size_x) + cfg.min)
+					end
 				end)
 			end
 
@@ -4963,31 +4930,16 @@
 				cfg.set(nil, nil)
 			end
 			
-			alpha.MouseButton1Down:Connect(function()
-				dragging_alpha = true 
-			end)
+			-- sat/hue/alpha drags route through the ONE shared drag dispatcher
+			-- (was 2 global input connections created PER colorpicker)
+			local function begin_pick(which)
+				dragging_sat, dragging_hue, dragging_alpha = which == 1, which == 2, which == 3
+				library.active_drag = function() cfg.update_color() end
+			end
 
-			hue.MouseButton1Down:Connect(function()
-				dragging_hue = true 
-			end)
-
-			sat.MouseButton1Down:Connect(function()
-				dragging_sat = true  
-			end)
-
-			uis.InputEnded:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					dragging_sat = false
-					dragging_hue = false
-					dragging_alpha = false 
-				end
-			end)
-
-			uis.InputChanged:Connect(function(input)
-				if (dragging_sat or dragging_hue or dragging_alpha) and input.UserInputType == Enum.UserInputType.MouseMovement then
-					cfg.update_color() 
-				end
-			end)	
+			alpha.MouseButton1Down:Connect(function() begin_pick(3) end)
+			hue.MouseButton1Down:Connect(function() begin_pick(2) end)
+			sat.MouseButton1Down:Connect(function() begin_pick(1) end)
 
 			-- rainbow: register into ONE shared per-frame driver instead of a coroutine
 			-- per colorpicker (dozens of pickers = dozens of idle per-frame wakes). The
