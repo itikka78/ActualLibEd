@@ -5025,23 +5025,50 @@
 
 			flags[cfg.flag] = {} 
 			
-			local KEYBIND_ELEMENT;
-			if cfg.name then 
-				KEYBIND_ELEMENT = library:create("TextLabel", {
+			local KEYBIND_ELEMENT, KB_NAME_LABEL, KB_KEY_LABEL;
+			if cfg.name then
+				-- keybind-list row: feature name on the left, bound key on the right. Every
+				-- named bind is listed persistently (not just while active); the row tints to
+				-- the theme accent while the bind is engaged and a muted text colour otherwise
+				-- (driven from cfg.set on each active/key change).
+				KEYBIND_ELEMENT = library:create("Frame", {
 					Parent = library.keybind_list,
+					Name = "",
+					Size = dim2(1, -5, 0, 16),
+					Visible = false,
+					BorderSizePixel = 0,
+					BackgroundTransparency = 1,
+					BackgroundColor3 = rgb(255, 255, 255)
+				})
+				KB_NAME_LABEL = library:create("TextLabel", {
+					Parent = KEYBIND_ELEMENT,
 					Name = "",
 					FontFace = library.font,
 					TextColor3 = themes.preset.text,
 					BorderColor3 = rgb(0, 0, 0),
-					Text = "[ Hold ]  Fly - X",
-					Size = dim2(1, -5, 0, 18),
-					Visible = false, 
-					Position = dim2(0, 5, 0, -1),
+					Text = cfg.name,
+					Size = dim2(0.62, 0, 1, 0),
+					Position = dim2(0, 0, 0, 0),
 					BorderSizePixel = 0,
 					BackgroundTransparency = 1,
 					TextXAlignment = Enum.TextXAlignment.Left,
 					TextTruncate = Enum.TextTruncate.AtEnd,
-					AutomaticSize = Enum.AutomaticSize.Y,
+					TextSize = 12,
+					BackgroundColor3 = themes.preset.text
+				}, "text")
+				KB_KEY_LABEL = library:create("TextLabel", {
+					Parent = KEYBIND_ELEMENT,
+					Name = "",
+					FontFace = library.font,
+					TextColor3 = themes.preset.text,
+					BorderColor3 = rgb(0, 0, 0),
+					Text = "[-]",
+					Size = dim2(0.38, 0, 1, 0),
+					Position = dim2(0.62, 0, 0, 0),
+					BorderSizePixel = 0,
+					BackgroundTransparency = 1,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					TextTruncate = Enum.TextTruncate.AtEnd,
 					TextSize = 12,
 					BackgroundColor3 = themes.preset.text
 				}, "text")
@@ -5325,23 +5352,18 @@
 						active = cfg.active
 					}
 					
-					if cfg.name then 
-						KEYBIND_ELEMENT.Visible = cfg.active
+					if cfg.name then
+						-- persistent list entry: always shown, accent while active / muted idle
+						KEYBIND_ELEMENT.Visible = true
 
-						library:tween(KEYBIND_ELEMENT, {
-							TextTransparency = cfg.active and 0 or 1, 
-						}) 
-
-						library:tween(KEYBIND_ELEMENT:FindFirstChildOfClass("UIStroke"), {
-							Transparency = cfg.active and 0 or 1, 
-						}) 
-						
 						local text = tostring(cfg.key) ~= "Enums" and (keys[cfg.key] or tostring(cfg.key):gsub("Enum.", "")) or nil
-						local __text = text and (tostring(text):gsub("KeyCode.", ""):gsub("UserInputType.", ""))
+						local __text = text and (tostring(text):gsub("KeyCode.", ""):gsub("UserInputType.", "")) or "none"
 
-						if cfg.name then 
-							KEYBIND_ELEMENT.Text = "[ " .. string.upper(string.sub(cfg.mode, 1, 1)) .. string.sub(cfg.mode, 2) .. " ] " .. cfg.name .. " - " .. __text
-						end
+						local kb_col = cfg.active and themes.preset.accent or themes.preset.text
+						KB_NAME_LABEL.Text = cfg.name
+						KB_NAME_LABEL.TextColor3 = kb_col
+						KB_KEY_LABEL.Text = "[" .. tostring(__text) .. "]"
+						KB_KEY_LABEL.TextColor3 = kb_col
 					end
 				end
 
