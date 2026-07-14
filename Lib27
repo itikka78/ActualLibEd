@@ -2550,9 +2550,13 @@
 			end
 
 			task.spawn(function()
+				local sg
 				while true do
 					task.wait()
-					cfg.change_health()
+					-- only animate the preview health while the ESP-preview panel is on-screen
+					-- (menu open). Resolve+cache the panel ScreenGui once, then gate on Enabled.
+					if not sg then sg = items.viewportframe and items.viewportframe:FindFirstAncestorWhichIsA("ScreenGui") end
+					if (not sg) or sg.Enabled then cfg.change_health() end
 				end
 			end)
 
@@ -4985,18 +4989,28 @@
 				end
 			end)	
 
-			task.spawn(function()
-				while true do 
-					task.wait()
-					if flags[cfg.flag .. "_RAINBOW_FLAG"] then 
-						cfg.set(
-							hsv(math.abs(math.sin(tick())), 
-							s, 
-							v
-						), a) 
-					end     
-				end     
-			end)
+			-- rainbow: register into ONE shared per-frame driver instead of a coroutine
+			-- per colorpicker (dozens of pickers = dozens of idle per-frame wakes). The
+			-- driver only recolors pickers whose RAINBOW flag is currently on.
+			do
+				local rainbow_flag = cfg.flag .. "_RAINBOW_FLAG"
+				library._rainbow_pickers = library._rainbow_pickers or {}
+				insert(library._rainbow_pickers, function()
+					if flags[rainbow_flag] then
+						cfg.set(hsv(math.abs(math.sin(tick())), s, v), a)
+					end
+				end)
+				if not library._rainbow_driver then
+					library._rainbow_driver = true
+					task.spawn(function()
+						while true do
+							task.wait()
+							local list = library._rainbow_pickers
+							for i = 1, #list do pcall(list[i]) end
+						end
+					end)
+				end
+			end
 
 			cfg.set(cfg.color, cfg.alpha)
 
