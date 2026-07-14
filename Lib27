@@ -5470,9 +5470,8 @@
 		
 				cfg.set({mode = cfg.mode, active = cfg.active, key = cfg.key})
 
-				if cfg.name then
-					-- list gate: show this row only while the parent feature (parent_flag) is on.
-					-- poll is cheap (a few named binds) and handles toggle(bool)/dropdown(string) parents
+				if cfg.name and kb_set_listed then
+					-- list gate: this row shows only while the parent feature (parent_flag) is on.
 					local function parent_active()
 						if not parent_flag then return true end
 						local v = flags[parent_flag]
@@ -5485,14 +5484,18 @@
 						if v == nil then return false end
 						return true
 					end
-					if kb_set_listed then kb_set_listed(parent_active()) end
-					task.spawn(function()
-						while true do
-							task.wait(0.15)
-							if not KEYBIND_ELEMENT or KEYBIND_ELEMENT.Parent == nil then break end
-							if kb_set_listed then kb_set_listed(parent_active()) end
+					kb_set_listed(parent_active())
+					-- event-driven (no polling): wrap the parent element's set so the row updates the
+					-- instant that feature flips. Covers UI clicks AND config loads (config_flags is
+					-- repointed to the wrapper). Standalone binds (no parent_flag) skip this.
+					if parent_flag and type(self.set) == "function" then
+						local parent_set = self.set
+						self.set = function(...)
+							parent_set(...)
+							kb_set_listed(parent_active())
 						end
-					end)
+						library.config_flags[parent_flag] = self.set
+					end
 				end
 		
 				library.config_flags[cfg.flag] = cfg.set
