@@ -5025,7 +5025,11 @@
 
 			flags[cfg.flag] = {} 
 			
-			local KEYBIND_ELEMENT, KB_NAME_LABEL, KB_KEY_LABEL;
+			-- the element this keybind is chained onto (toggle/dropdown). Its flag decides
+			-- whether this keybind is LISTED: the row only shows while that feature is on.
+			-- Standalone keybinds (self == library) have no parent flag -> always listed.
+			local parent_flag = (self ~= library) and self.flag or nil
+			local KEYBIND_ELEMENT, KB_NAME_LABEL, KB_KEY_LABEL, KB_NAME_STROKE, KB_KEY_STROKE, kb_set_listed;
 			if cfg.name then
 				-- keybind-list row: feature name on the left, bound key on the right. Every
 				-- named bind is listed persistently (not just while active); the row tints to
@@ -5072,6 +5076,33 @@
 					TextSize = 12,
 					BackgroundColor3 = themes.preset.text
 				}, "text")
+				KB_NAME_STROKE = KB_NAME_LABEL:FindFirstChildOfClass("UIStroke")
+				KB_KEY_STROKE  = KB_KEY_LABEL:FindFirstChildOfClass("UIStroke")
+				-- fade the row in when the parent feature turns on; fade out then collapse when off
+				local kb_shown = false
+				kb_set_listed = function(on)
+					if on == kb_shown then return end
+					kb_shown = on
+					if on then
+						KEYBIND_ELEMENT.Visible = true
+						KB_NAME_LABEL.TextTransparency = 1
+						KB_KEY_LABEL.TextTransparency = 1
+						if KB_NAME_STROKE then KB_NAME_STROKE.Transparency = 1 end
+						if KB_KEY_STROKE  then KB_KEY_STROKE.Transparency  = 1 end
+						library:tween(KB_NAME_LABEL, {TextTransparency = 0})
+						library:tween(KB_KEY_LABEL,  {TextTransparency = 0})
+						if KB_NAME_STROKE then library:tween(KB_NAME_STROKE, {Transparency = 0}) end
+						if KB_KEY_STROKE  then library:tween(KB_KEY_STROKE,  {Transparency = 0}) end
+					else
+						library:tween(KB_NAME_LABEL, {TextTransparency = 1})
+						library:tween(KB_KEY_LABEL,  {TextTransparency = 1})
+						if KB_NAME_STROKE then library:tween(KB_NAME_STROKE, {Transparency = 1}) end
+						if KB_KEY_STROKE  then library:tween(KB_KEY_STROKE,  {Transparency = 1}) end
+						task.delay(0.25, function()
+							if not kb_shown then KEYBIND_ELEMENT.Visible = false end
+						end)
+					end
+				end
 			end 
 
 			local element_outline = library:create("TextButton", {
@@ -5353,8 +5384,7 @@
 					}
 					
 					if cfg.name then
-						-- persistent list entry: always shown, accent while active / muted idle
-						KEYBIND_ELEMENT.Visible = true
+						-- row text + accent-while-active colour; visibility is driven by kb_set_listed
 
 						local text = tostring(cfg.key) ~= "Enums" and (keys[cfg.key] or tostring(cfg.key):gsub("Enum.", "")) or nil
 						local __text = text and (tostring(text):gsub("KeyCode.", ""):gsub("UserInputType.", "")) or "none"
@@ -5439,6 +5469,31 @@
 				end)
 		
 				cfg.set({mode = cfg.mode, active = cfg.active, key = cfg.key})
+
+				if cfg.name then
+					-- list gate: show this row only while the parent feature (parent_flag) is on.
+					-- poll is cheap (a few named binds) and handles toggle(bool)/dropdown(string) parents
+					local function parent_active()
+						if not parent_flag then return true end
+						local v = flags[parent_flag]
+						local ty = type(v)
+						if ty == "boolean" then return v end
+						if ty == "string" then
+							local lv = v:lower()
+							return lv ~= "off" and lv ~= "none" and lv ~= ""
+						end
+						if v == nil then return false end
+						return true
+					end
+					if kb_set_listed then kb_set_listed(parent_active()) end
+					task.spawn(function()
+						while true do
+							task.wait(0.15)
+							if not KEYBIND_ELEMENT or KEYBIND_ELEMENT.Parent == nil then break end
+							if kb_set_listed then kb_set_listed(parent_active()) end
+						end
+					end)
+				end
 		
 				library.config_flags[cfg.flag] = cfg.set
 			-- 
