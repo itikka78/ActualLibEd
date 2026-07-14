@@ -1249,6 +1249,15 @@
 					library.current_element_open.open = false 
 					library.current_element_open = nil 
 				end
+
+				-- "+" popups are not always the current_element_open (their sub-elements
+				-- can take that slot), so force-close every registered popup on menu toggle
+				if library.plus_popups then
+					for _, popup in ipairs(library.plus_popups) do
+						popup.set_visible(false)
+						popup.open = false
+					end
+				end
 			end 
 
 			-- dock init
@@ -4392,6 +4401,10 @@
 					window.Position = dim2(0, plus_button.AbsolutePosition.X - window.AbsoluteSize.X + 14, 0, plus_button.AbsolutePosition.Y + 17)
 				end
 			end
+
+			-- register for menu-close: set_menu_visibility force-hides every plus popup
+			library.plus_popups = library.plus_popups or {}
+			insert(library.plus_popups, cfg)
 
 			library:connection(plus_button.MouseButton1Click, function()
 				cfg.open = not cfg.open
