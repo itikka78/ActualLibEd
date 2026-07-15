@@ -300,7 +300,14 @@
 			if h and input.UserInputType == Enum.UserInputType.MouseMovement then h(input) end
 		end))
 		insert(library.connections, uis.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 then library.active_drag = nil end
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				if library.active_drag_release then
+					local rel = library.active_drag_release
+					library.active_drag_release = nil
+					pcall(rel)
+				end
+				library.active_drag = nil
+			end
 		end))
 
 		function library:make_resizable(frame) 
@@ -337,6 +344,53 @@
 			end)
 		end
 
+		-- Aero Snap overlay (lazy): a hollow accent outline shown while dragging a
+		-- window with "Aero Snap" on (the window itself only moves on release), plus
+		-- center alignment guides that pop whenever a drag nears the screen middle.
+		local function ensure_snap_gui()
+			if library._snap_outline then return end
+			local g = library:create("ScreenGui", {
+				Parent = gethui(),
+				Name = "",
+				DisplayOrder = 2000000,
+			})
+			local outline = library:create("Frame", {
+				Parent = g,
+				Name = "",
+				BackgroundColor3 = themes.preset.accent,
+				BackgroundTransparency = 0.9,
+				BorderSizePixel = 0,
+				Visible = false,
+			}) library:apply_theme(outline, "accent", "BackgroundColor3")
+			local stroke = library:create("UIStroke", {
+				Parent = outline,
+				Thickness = 1,
+				Color = themes.preset.accent,
+				LineJoinMode = Enum.LineJoinMode.Miter,
+			}) library:apply_theme(stroke, "accent", "Color")
+			library._snap_outline = outline
+			library._guide_v = library:create("Frame", {
+				Parent = g,
+				Name = "",
+				AnchorPoint = vec2(0.5, 0),
+				Position = dim2(0.5, 0, 0, 0),
+				Size = dim2(0, 1, 1, 0),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.accent,
+				Visible = false,
+			}) library:apply_theme(library._guide_v, "accent", "BackgroundColor3")
+			library._guide_h = library:create("Frame", {
+				Parent = g,
+				Name = "",
+				AnchorPoint = vec2(0, 0.5),
+				Position = dim2(0, 0, 0.5, 0),
+				Size = dim2(1, 0, 0, 1),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.accent,
+				Visible = false,
+			}) library:apply_theme(library._guide_h, "accent", "BackgroundColor3")
+		end
+
 		function library:draggify(frame)
 			local start_size = frame.Position
 			local start
@@ -357,16 +411,54 @@
 						frame.Parent.DisplayOrder = library.display_orders
 					end
 
+					ensure_snap_gui()
+					local aero = flags["aero_snap"] == true
+					local target_x, target_y = start_size.X.Offset, start_size.Y.Offset
+					if aero then
+						library._snap_outline.Position = dim2(0, target_x - frame.AbsoluteSize.X * frame.AnchorPoint.X, 0, target_y - frame.AbsoluteSize.Y * frame.AnchorPoint.Y)
+						library._snap_outline.Size = dim2(0, frame.AbsoluteSize.X, 0, frame.AbsoluteSize.Y)
+						library._snap_outline.Visible = true
+					end
+
 					-- drag via the ONE shared dispatcher (was a global InputChanged per frame)
 					library.active_drag = function(inp)
 						local viewport_x = camera.ViewportSize.X
 						local viewport_y = camera.ViewportSize.Y
-						frame.Position = dim2(
-							0,
-							clamp(start_size.X.Offset + (inp.Position.X - start.X), 0, viewport_x - frame.Size.X.Offset),
-							0,
-							clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), 0, viewport_y - frame.Size.Y.Offset)
-						)
+						local x = clamp(start_size.X.Offset + (inp.Position.X - start.X), 0, viewport_x - frame.Size.X.Offset)
+						local y = clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), 0, viewport_y - frame.Size.Y.Offset)
+						-- center alignment: when the frame's middle nears a screen center
+						-- axis, snap onto it and pop the matching guide line (any drag mode)
+						local w, h = frame.AbsoluteSize.X, frame.AbsoluteSize.Y
+						local ax, ay = frame.AnchorPoint.X, frame.AnchorPoint.Y
+						local tx, ty = x - w * ax, y - h * ay
+						if abs((tx + w * 0.5) - viewport_x * 0.5) <= 10 then
+							x = viewport_x * 0.5 - w * 0.5 + w * ax
+							tx = x - w * ax
+							library._guide_v.Visible = true
+						else
+							library._guide_v.Visible = false
+						end
+						if abs((ty + h * 0.5) - viewport_y * 0.5) <= 10 then
+							y = viewport_y * 0.5 - h * 0.5 + h * ay
+							ty = y - h * ay
+							library._guide_h.Visible = true
+						else
+							library._guide_h.Visible = false
+						end
+						target_x, target_y = x, y
+						if aero then
+							library._snap_outline.Position = dim2(0, tx, 0, ty)
+						else
+							frame.Position = dim2(0, x, 0, y)
+						end
+					end
+					library.active_drag_release = function()
+						library._snap_outline.Visible = false
+						library._guide_v.Visible = false
+						library._guide_h.Visible = false
+						if aero then
+							frame.Position = dim2(0, target_x, 0, target_y)
+						end
 					end
 				end
 			end)
@@ -418,6 +510,38 @@
 				
 			return tween
 		end 
+
+		-- UI feedback sounds (Style > Other): "click" = toggles/buttons/tabs/dropdowns,
+		-- "drag" = slider value ticks. Style dropdowns pick a preset or "Custom" (id box);
+		-- volume is per-kind. Debounced so nested handlers don't stack sounds.
+		library.ui_sound_presets = {
+			Neverlose = "rbxassetid://8726881116",
+		}
+		library._last_ui_sound = {}
+		function library:ui_sound(kind)
+			local style = flags["ui_" .. kind .. "_style"]
+			if not style or style == "Off" then return end
+			local id
+			if style == "Custom" then
+				id = tostring(flags["ui_" .. kind .. "_custom"] or ""):gsub("%s", "")
+				if id == "" then return end
+				if not id:find("rbxassetid://", 1, true) then id = "rbxassetid://" .. id end
+			else
+				id = library.ui_sound_presets[style]
+			end
+			if not id then return end
+			local now = os.clock()
+			if now - (library._last_ui_sound[kind] or 0) < 0.05 then return end
+			library._last_ui_sound[kind] = now
+			pcall(function()
+				local snd = Instance.new("Sound")
+				snd.SoundId = id
+				snd.Volume = flags["ui_" .. kind .. "_vol"] or 1
+				snd.Parent = sound_service
+				snd:Play()
+				debris:AddItem(snd, 2)
+			end)
+		end
 
 		function library:config_list_update() 
 			if not config_holder then return end 
@@ -896,6 +1020,7 @@
 			end)
 
 			items.button.MouseButton1Click:Connect(function()
+				library:ui_sound("click")
 				items.sgui.Enabled = not items.sgui.Enabled
 			end)
 			
@@ -1618,11 +1743,46 @@
 
 				local watermark = library:watermark({default = os.date('Fem.Hook |  - %b %d %Y - %H:%M:%S')})  
 
+				-- watermark text: rebuilt every second from the Style > Watermark Options
+				-- popup — custom text first, then whichever elements are selected.
+				local wm_game_name
 				task.spawn(function()
-					while task.wait(1) do 
-						watermark.change_text(os.date('Fem.Hook - Tester - %b %d %Y - %H:%M:%S'))
-					end 
-				end) 
+					pcall(function()
+						wm_game_name = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+					end)
+				end)
+				local wm_frames = 0
+				library:connection(run.RenderStepped, function() wm_frames += 1 end)
+				task.spawn(function()
+					while task.wait(1) do
+						pcall(function()
+							local fps = wm_frames; wm_frames = 0
+							local sel = flags["watermark_elements"]
+							local set = {}
+							if type(sel) == "table" then
+								for _, v in next, sel do set[v] = true end
+							elseif type(sel) == "string" then
+								set[sel] = true
+							end
+							local parts = {}
+							local base = tostring(flags["watermark_text"] or "")
+							if base ~= "" then insert(parts, base) end
+							if set["User"] then insert(parts, lp.Name) end
+							if set["Version"] then insert(parts, library.watermark_version or "v1.0") end
+							if set["FPS"] then insert(parts, fps .. " fps") end
+							if set["Ping"] then
+								local ping = 0
+								pcall(function() ping = floor(stats.Network.ServerStatsItem["Data Ping"]:GetValue()) end)
+								insert(parts, ping .. "ms")
+							end
+							if set["UID"] then insert(parts, "uid " .. tostring(lp.UserId)) end
+							if set["Game"] then insert(parts, string.lower(wm_game_name or "roblox")) end
+							if set["Date"] then insert(parts, os.date("%b %d %Y")) end
+							if set["Time"] then insert(parts, os.date("%H:%M:%S")) end
+							watermark.change_text(concat(parts, " - "))
+						end)
+					end
+				end)
 
 				local items = style.items
 
@@ -1681,9 +1841,31 @@
 				section:toggle({name = "Keybind List", flag = "keybind_list", callback = function(bool)
 					library.keybind_list_frame.Visible = bool
 				end})
-				section:toggle({name = "Watermark", flag = "watermark", callback = function(bool)
+				local wm_tgl = section:toggle({name = "Watermark", flag = "watermark", callback = function(bool)
 					watermark.set_visible(bool)
 				end})
+				local wm_opts = wm_tgl:plus({name = "Watermark Options"})
+				wm_opts:label({name = "Watermark Elements"})
+				wm_opts:dropdown({name = "Elements", flag = "watermark_elements", multi = true,
+					items = {"User", "Version", "FPS", "Ping", "UID", "Game", "Date", "Time"},
+					default = {"User", "Version", "FPS", "Ping", "Date", "Time"}})
+				wm_opts:label({name = "Custom Watermark Text"})
+				wm_opts:textbox({name = "Watermark Text", flag = "watermark_text", default = "fem.hook", placeholder = "watermark text", callback = function(text) end})
+				section:toggle({name = "Aero Snap", flag = "aero_snap", default = false})
+				section:label({name = "Click Sound"})
+				local ui_click_custom
+				section:dropdown({name = "Click Sound", flag = "ui_click_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
+					callback = function(v) if ui_click_custom then ui_click_custom.set_element_visible(v == "Custom") end end})
+				ui_click_custom = section:textbox({name = "Click Sound ID", flag = "ui_click_custom", placeholder = "soundid here", callback = function(text) end})
+				ui_click_custom.set_element_visible(false)
+				section:slider({name = "Click Volume", flag = "ui_click_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
+				section:label({name = "Drag Sound"})
+				local ui_drag_custom
+				section:dropdown({name = "Drag Sound", flag = "ui_drag_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
+					callback = function(v) if ui_drag_custom then ui_drag_custom.set_element_visible(v == "Custom") end end})
+				ui_drag_custom = section:textbox({name = "Drag Sound ID", flag = "ui_drag_custom", placeholder = "soundid here", callback = function(text) end})
+				ui_drag_custom.set_element_visible(false)
+				section:slider({name = "Drag Volume", flag = "ui_drag_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
 				section:button_holder({})
 				section:button({name = "Copy JobId", callback = function()
 					setclipboard(game.JobId)
@@ -2840,7 +3022,10 @@
 				end
 			end
 			
-			tab_holder.MouseButton1Click:Connect(cfg.open_tab)
+			tab_holder.MouseButton1Click:Connect(function()
+				library:ui_sound("click")
+				cfg.open_tab()
+			end)
 			
 			return setmetatable(cfg, library) 
 		end
@@ -3069,6 +3254,7 @@
 				end
 
 				library:connection(tabb.MouseButton1Click, function()
+					library:ui_sound("click")
 					for _, multi_s in next, cfg.sections do 
 						multi_s:open_tab(false)
 					end
@@ -3973,9 +4159,12 @@
 				-- drag routes through the ONE shared dispatcher (was 2 global input
 				-- connections created PER slider — hundreds with a full menu)
 				slider.MouseButton1Down:Connect(function()
+					library:ui_sound("drag")
 					library.active_drag = function(input)
 						local size_x = (input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X
+						local prev = cfg.value
 						cfg.set(((cfg.max - cfg.min) * size_x) + cfg.min)
+						if cfg.value ~= prev then library:ui_sound("drag") end
 					end
 				end)
 			end
@@ -4173,12 +4362,14 @@
 			end 
 		
 			library:connection(toggle_holder.MouseButton1Click, function()
+				library:ui_sound("click")
 				cfg.enabled = not cfg.enabled
 		
 				cfg.set(cfg.enabled)
 			end)
 
 			library:connection(toggle.MouseButton1Click, function()
+				library:ui_sound("click")
 				cfg.enabled = not cfg.enabled
 		
 				cfg.set(cfg.enabled)
@@ -4407,6 +4598,7 @@
 			insert(library.plus_popups, cfg)
 
 			library:connection(plus_button.MouseButton1Click, function()
+				library:ui_sound("click")
 				cfg.open = not cfg.open
 				cfg.set_visible(cfg.open)
 			end)
@@ -4882,7 +5074,8 @@
 				end
 			end 
 
-			colorpicker_button.MouseButton1Click:Connect(function()		
+			colorpicker_button.MouseButton1Click:Connect(function()
+				library:ui_sound("click")		
 				cfg.open = not cfg.open
 
 				cfg.set_visible(cfg.open) 
@@ -5908,6 +6101,7 @@
 					insert(cfg.option_instances, TextButton)
 
 					TextButton.MouseButton1Down:Connect(function()
+						library:ui_sound("click")
 						if cfg.multi then 
 							local selected_index = find(cfg.multi_items, TextButton.Text)
 
@@ -5929,6 +6123,7 @@
 			end
 
 			dropdown.MouseButton1Click:Connect(function()
+				library:ui_sound("click")
 				cfg.open = not cfg.open 
 
 				cfg.set_visible(cfg.open)
@@ -6517,6 +6712,7 @@
 			})
 
 			button.MouseButton1Click:Connect(function()
+				library:ui_sound("click")
 				cfg.callback() 
 			end)
 
