@@ -123,6 +123,7 @@
 				["ImageColor3"] = {},
 			},
 			["accent"] = {
+				["Color"] = {}, 
 				["BackgroundColor3"] = {}, 	
 				["TextColor3"] = {}, 
 				["ImageColor3"] = {}, 
@@ -411,8 +412,11 @@
 						frame.Parent.DisplayOrder = library.display_orders
 					end
 
-					ensure_snap_gui()
-					local aero = flags["aero_snap"] == true
+					-- overlay build is pcalled + gated: if it ever fails, dragging still
+					-- works normally (no aero / no guides instead of a dead handler)
+					pcall(ensure_snap_gui)
+					local snap_ok = library._snap_outline ~= nil and library._guide_v ~= nil and library._guide_h ~= nil
+					local aero = snap_ok and flags["aero_snap"] == true
 					local target_x, target_y = start_size.X.Offset, start_size.Y.Offset
 					if aero then
 						library._snap_outline.Position = dim2(0, target_x - frame.AbsoluteSize.X * frame.AnchorPoint.X, 0, target_y - frame.AbsoluteSize.Y * frame.AnchorPoint.Y)
@@ -426,24 +430,27 @@
 						local viewport_y = camera.ViewportSize.Y
 						local x = clamp(start_size.X.Offset + (inp.Position.X - start.X), 0, viewport_x - frame.Size.X.Offset)
 						local y = clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), 0, viewport_y - frame.Size.Y.Offset)
-						-- center alignment: when the frame's middle nears a screen center
-						-- axis, snap onto it and pop the matching guide line (any drag mode)
-						local w, h = frame.AbsoluteSize.X, frame.AbsoluteSize.Y
-						local ax, ay = frame.AnchorPoint.X, frame.AnchorPoint.Y
-						local tx, ty = x - w * ax, y - h * ay
-						if abs((tx + w * 0.5) - viewport_x * 0.5) <= 10 then
-							x = viewport_x * 0.5 - w * 0.5 + w * ax
-							tx = x - w * ax
-							library._guide_v.Visible = true
-						else
-							library._guide_v.Visible = false
-						end
-						if abs((ty + h * 0.5) - viewport_y * 0.5) <= 10 then
-							y = viewport_y * 0.5 - h * 0.5 + h * ay
-							ty = y - h * ay
-							library._guide_h.Visible = true
-						else
-							library._guide_h.Visible = false
+						local tx, ty = x, y
+						if snap_ok then
+							-- center alignment: when the frame's middle nears a screen center
+							-- axis, snap onto it and pop the matching guide line (any drag mode)
+							local w, h = frame.AbsoluteSize.X, frame.AbsoluteSize.Y
+							local ax, ay = frame.AnchorPoint.X, frame.AnchorPoint.Y
+							tx, ty = x - w * ax, y - h * ay
+							if abs((tx + w * 0.5) - viewport_x * 0.5) <= 10 then
+								x = viewport_x * 0.5 - w * 0.5 + w * ax
+								tx = x - w * ax
+								library._guide_v.Visible = true
+							else
+								library._guide_v.Visible = false
+							end
+							if abs((ty + h * 0.5) - viewport_y * 0.5) <= 10 then
+								y = viewport_y * 0.5 - h * 0.5 + h * ay
+								ty = y - h * ay
+								library._guide_h.Visible = true
+							else
+								library._guide_h.Visible = false
+							end
 						end
 						target_x, target_y = x, y
 						if aero then
@@ -453,9 +460,11 @@
 						end
 					end
 					library.active_drag_release = function()
-						library._snap_outline.Visible = false
-						library._guide_v.Visible = false
-						library._guide_h.Visible = false
+						if snap_ok then
+							library._snap_outline.Visible = false
+							library._guide_v.Visible = false
+							library._guide_h.Visible = false
+						end
 						if aero then
 							frame.Position = dim2(0, target_x, 0, target_y)
 						end
