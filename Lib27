@@ -1776,6 +1776,10 @@
 							local parts = {}
 							local base = tostring(flags["watermark_text"] or "")
 							if base ~= "" then insert(parts, base) end
+							-- key tier (library.watermark_tier, e.g. "free"/"tester") is FORCE-shown
+							if library.watermark_tier and library.watermark_tier ~= "" then
+								insert(parts, string.lower(tostring(library.watermark_tier)))
+							end
 							if set["User"] then insert(parts, lp.Name) end
 							if set["Version"] then insert(parts, library.watermark_version or "v1.0") end
 							if set["FPS"] then insert(parts, fps .. " fps") end
@@ -1784,7 +1788,7 @@
 								pcall(function() ping = floor(stats.Network.ServerStatsItem["Data Ping"]:GetValue()) end)
 								insert(parts, ping .. "ms")
 							end
-							if set["UID"] then insert(parts, "uid " .. tostring(lp.UserId)) end
+							if set["UID"] then insert(parts, "uid " .. tostring(library.watermark_uid or lp.UserId)) end
 							if set["Game"] then insert(parts, string.lower(wm_game_name or "roblox")) end
 							if set["Date"] then insert(parts, os.date("%b %d %Y")) end
 							if set["Time"] then insert(parts, os.date("%H:%M:%S")) end
