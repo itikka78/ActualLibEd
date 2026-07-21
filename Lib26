@@ -1843,68 +1843,83 @@
 				:colorpicker({name = "Glow", color = themes.preset.glow, callback = function(color, alpha)
 					library:update_theme("glow", color)
 				end, flag = "Glow"})
-				section:slider({name = "Blur Size", flag = "Blur Size", min = 0, max = 56, default = 15, interval = 1, callback = function(int)
-					if window.opened then 
-						blur.Size = int
-					end
-				end})
-				local section = column:section({name = "Other"})
-				section:label({name = "UI Bind"})
-				:keybind({callback = window.set_menu_visibility, key = Enum.KeyCode.Insert})
-				section:toggle({name = "Keybind List", flag = "keybind_list", callback = function(bool)
-					library.keybind_list_frame.Visible = bool
-				end})
-				local wm_tgl = section:toggle({name = "Watermark", flag = "watermark", callback = function(bool)
-					watermark.set_visible(bool)
-				end})
-				local wm_opts = wm_tgl:plus({name = "Watermark Options"})
-				wm_opts:label({name = "Watermark Elements"})
-				wm_opts:dropdown({name = "Elements", flag = "watermark_elements", multi = true,
-					items = {"User", "Version", "FPS", "Ping", "UID", "Game", "Date", "Time"},
-					default = {"User", "Version", "FPS", "Ping", "Date", "Time"}})
-				wm_opts:label({name = "Custom Watermark Text"})
-				wm_opts:textbox({name = "Watermark Text", flag = "watermark_text", default = "fem.hook", placeholder = "watermark text", callback = function(text) end})
-				section:toggle({name = "Aero Snap", flag = "aero_snap", default = false})
-				section:label({name = "Click Sound"})
-				local ui_click_custom
-				section:dropdown({name = "Click Sound", flag = "ui_click_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
-					callback = function(v) if ui_click_custom then ui_click_custom.set_element_visible(v == "Custom") end end})
-				ui_click_custom = section:textbox({name = "Click Sound ID", flag = "ui_click_custom", placeholder = "soundid here", callback = function(text) end})
-				ui_click_custom.set_element_visible(false)
-				section:slider({name = "Click Volume", flag = "ui_click_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
-				section:label({name = "Drag Sound"})
-				local ui_drag_custom
-				section:dropdown({name = "Drag Sound", flag = "ui_drag_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
-					callback = function(v) if ui_drag_custom then ui_drag_custom.set_element_visible(v == "Custom") end end})
-				ui_drag_custom = section:textbox({name = "Drag Sound ID", flag = "ui_drag_custom", placeholder = "soundid here", callback = function(text) end})
-				ui_drag_custom.set_element_visible(false)
-				section:slider({name = "Drag Volume", flag = "ui_drag_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
-				section:button_holder({})
-				section:button({name = "Copy JobId", callback = function()
-					setclipboard(game.JobId)
-				end})
-				section:button_holder({})
-				section:button({name = "Copy GameID", callback = function()
-					setclipboard(game.GameId)
-				end})
-				section:button_holder({})
-				section:button({name = "Copy Join Script", callback = function()
-					setclipboard('game:GetService("TeleportService"):TeleportToPlaceInstance(' .. game.PlaceId .. ', "' .. game.JobId .. '", game.Players.LocalPlayer)')
-				end})
-				section:button_holder({})
-				section:button({name = "Rejoin", callback = function()
-					game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, lp)
-				end})
-				section:button_holder({})
-				section:button({name = "Join New Server", callback = function()
-					local apiRequest = game:GetService("HttpService"):JSONDecode(game:HttpGetAsync("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
-					local data = apiRequest.data[random(1, #apiRequest.data)]
-						
-					if data.playing <= flags["max_players"] then 
-						game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, data.id)
-					end 
-				end})
-				section:slider({name = "Max Players", flag = "max_players", min = 0, max = 40, default = 15, interval = 1})
+				-- everything that isn't a colour now lives in a tabbed pair: "Accessibility"
+				-- holds the binds/watermark/sound settings, "Other" holds the sliders and
+				-- the server/clipboard buttons (Blur Size moved out of Theme to join them)
+				local access_section, other_section = column:multi_section({names = {"Accessibility", "Other"}})
+
+				-- accessibility tab
+					access_section:label({name = "UI Bind"})
+					:keybind({callback = window.set_menu_visibility, key = Enum.KeyCode.Insert})
+					access_section:toggle({name = "Keybind List", flag = "keybind_list", callback = function(bool)
+						library.keybind_list_frame.Visible = bool
+					end})
+					local wm_tgl = access_section:toggle({name = "Watermark", flag = "watermark", callback = function(bool)
+						watermark.set_visible(bool)
+					end})
+					local wm_opts = wm_tgl:plus({name = "Watermark Options"})
+					wm_opts:label({name = "Watermark Elements"})
+					wm_opts:dropdown({name = "Elements", flag = "watermark_elements", multi = true,
+						items = {"User", "Version", "FPS", "Ping", "UID", "Game", "Date", "Time"},
+						default = {"User", "Version", "FPS", "Ping", "Date", "Time"}})
+					wm_opts:label({name = "Custom Watermark Text"})
+					wm_opts:textbox({name = "Watermark Text", flag = "watermark_text", default = "fem.hook", placeholder = "watermark text", callback = function(text) end})
+					access_section:toggle({name = "Aero Snap", flag = "aero_snap", default = false})
+					-- the dropdowns are left unnamed on purpose: the label above is the
+					-- heading, so a second inline name would just print the text twice
+					access_section:label({name = "Click Sound Style"})
+					local ui_click_custom
+					access_section:dropdown({flag = "ui_click_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
+						callback = function(v) if ui_click_custom then ui_click_custom.set_element_visible(v == "Custom") end end})
+					ui_click_custom = access_section:textbox({name = "Click Sound ID", flag = "ui_click_custom", placeholder = "soundid here", callback = function(text) end})
+					ui_click_custom.set_element_visible(false)
+					access_section:slider({name = "Click Sound Volume", flag = "ui_click_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
+					access_section:label({name = "Drag Sound Style"})
+					local ui_drag_custom
+					access_section:dropdown({flag = "ui_drag_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
+						callback = function(v) if ui_drag_custom then ui_drag_custom.set_element_visible(v == "Custom") end end})
+					ui_drag_custom = access_section:textbox({name = "Drag Sound ID", flag = "ui_drag_custom", placeholder = "soundid here", callback = function(text) end})
+					ui_drag_custom.set_element_visible(false)
+					access_section:slider({name = "Drag Sound Volume", flag = "ui_drag_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
+				--
+
+				-- other tab
+					-- global animation rate: every animated effect (ESP box gradients,
+					-- healthbar sweeps, cham pulses) recomputes at this cadence instead of
+					-- once per rendered frame, so it doubles as an animation perf cap
+					other_section:slider({name = "Animation Frequency", flag = "anim_freq", min = 15, max = 240, default = 60, interval = 1, suffix = "hz/240hz"})
+					-- global speed multiplier applied on top of each effect's own rate
+					other_section:slider({name = "Animation Speed", flag = "anim_speed", min = 0.1, max = 3, default = 1, interval = 0.1, suffix = "/3"})
+					other_section:slider({name = "Blur Size", flag = "Blur Size", min = 0, max = 56, default = 15, interval = 1, suffix = "/56", callback = function(int)
+						if window.opened then
+							blur.Size = int
+						end
+					end})
+					other_section:slider({name = "Max Players", flag = "max_players", min = 0, max = 40, default = 15, interval = 1})
+					-- one holder per row: buttons sharing a holder split the width evenly
+					other_section:button_holder({})
+					other_section:button({name = "Copy JobId", callback = function()
+						setclipboard(game.JobId)
+					end})
+					other_section:button({name = "Copy GameID", callback = function()
+						setclipboard(game.GameId)
+					end})
+					other_section:button({name = "Copy Join Script", callback = function()
+						setclipboard('game:GetService("TeleportService"):TeleportToPlaceInstance(' .. game.PlaceId .. ', "' .. game.JobId .. '", game.Players.LocalPlayer)')
+					end})
+					other_section:button_holder({})
+					other_section:button({name = "Rejoin Server", callback = function()
+						game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, lp)
+					end})
+					other_section:button({name = "Join New Server", callback = function()
+						local apiRequest = game:GetService("HttpService"):JSONDecode(game:HttpGetAsync("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
+						local data = apiRequest.data[random(1, #apiRequest.data)]
+
+						if data.playing <= flags["max_players"] then
+							game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, data.id)
+						end
+					end})
+				--
 			-- 
 
 			-- cfg holder
