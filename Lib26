@@ -1985,14 +1985,20 @@
 					other_section:slider({name = "Max Players", flag = "max_players", min = 0, max = 40, default = 15, interval = 1})
 					-- one holder per row: buttons sharing a holder split the width evenly
 					other_section:button_holder({})
+					-- these log the copied value, not just "copied": a clipboard write is
+					-- silent, so the Output panel is the only confirmation you actually
+					-- got the id you wanted (and you can re-read it after the fact)
 					other_section:button({name = "Copy JobId", callback = function()
 						setclipboard(game.JobId)
+						library:log("Copied JobId: " .. tostring(game.JobId), "SUCCESS")
 					end})
 					other_section:button({name = "Copy GameID", callback = function()
 						setclipboard(game.GameId)
+						library:log("Copied GameId: " .. tostring(game.GameId), "SUCCESS")
 					end})
 					other_section:button({name = "Copy Join Script", callback = function()
 						setclipboard('game:GetService("TeleportService"):TeleportToPlaceInstance(' .. game.PlaceId .. ', "' .. game.JobId .. '", game.Players.LocalPlayer)')
+						library:log("Copied join script for place " .. tostring(game.PlaceId) .. " / job " .. tostring(game.JobId), "SUCCESS")
 					end})
 					other_section:button_holder({})
 					other_section:button({name = "Rejoin Server", callback = function()
@@ -4866,12 +4872,31 @@
 				local handler = library:create("Frame", {
 					Parent = inline,
 					Name = "handler",
-					ZIndex = 2;
+					ZIndex = 3;   -- sits above the alpha checker created just below
 					Position = dim2(0, 1, 0, 1),
 					BorderColor3 = rgb(0, 0, 0),
 					Size = dim2(1, -2, 1, -2),
 					BorderSizePixel = 0,
 					BackgroundColor3 = rgb(250, 165, 27)
+				})
+
+				-- alpha checker behind the row swatch. Declared after `handler` but drawn
+				-- under it via ZIndex, so the swatch (painted at the picked alpha in cfg.set)
+				-- shows the board through it. Without this a colour at 20% and the same
+				-- colour at 100% looked identical in the menu.
+				library:create("ImageLabel", {
+					Parent = inline,
+					Name = "",
+					ZIndex = 2,
+					ScaleType = Enum.ScaleType.Tile,
+					TileSize = dim2(0, 10, 0, 10),
+					Image = library:image("transparency.png", "rbxassetid://18274452449"),
+					Position = dim2(0, 1, 0, 1),
+					Size = dim2(1, -2, 1, -2),
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					BorderColor3 = rgb(0, 0, 0),
+					BackgroundColor3 = rgb(255, 255, 255)
 				})
 
 				library:hoverify(colorpicker_button, colorpicker_button)
@@ -5342,6 +5367,7 @@
 				visualize.BackgroundColor3 = Color
 				visualize.BackgroundTransparency = 1 - a   -- let the checker read through
 				handler.BackgroundColor3 = Color
+				handler.BackgroundTransparency = 1 - a
 
 				colorpicker.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
 				
