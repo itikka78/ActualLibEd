@@ -217,9 +217,48 @@
 		
 	library.__index = library
 
-	for _, path in next, library.folders do 
+	for _, path in next, library.folders do
 		makefolder(library.directory .. path)
-	end 
+	end
+
+	-- Local image assets (dock icons, glows) live in the /images folder made above,
+	-- next to the configs and fonts. Anything not on disk is fetched once on first run,
+	-- so a fresh install gets real icons instead of blank buttons. The fallback keeps
+	-- the old uploaded rbxassetid in play if the download or getcustomasset fails, and
+	-- a failure is cached as `false` so a dead link isn't retried on every lookup.
+	library.image_url = "https://raw.githubusercontent.com/itikka78/ActualLibEd/refs/heads/main/images/"
+	local image_cache = {}
+	function library:image(name, fallback)
+		local hit = image_cache[name]
+		if hit ~= nil then return hit or fallback end
+		local id
+		pcall(function()
+			local path = library.directory .. "/images/" .. name
+			if not isfile(path) then
+				writefile(path, game:HttpGet(library.image_url .. name))
+			end
+			id = getcustomasset(path)
+		end)
+		if id == "" then id = nil end
+		image_cache[name] = id or false
+		return id or fallback
+	end
+
+	-- Debug output. Anything in the script can push a line to the Output panel with
+	-- library:log("text", "WARN"). Levels: INFO / WARN / SUCCESS / ERROR / DEBUG.
+	-- Calls made before that panel exists (library init, or anything before :window()
+	-- runs) are buffered and flushed when it opens, so early startup lines — usually
+	-- the ones you most want to see — aren't silently dropped.
+	library.log_buffer = {}
+	function library:log(text, level)
+		local entry = {text = tostring(text), level = string.upper(tostring(level or "INFO"))}
+		if library.console then
+			library.console.add(entry.text, entry.level)
+		else
+			insert(library.log_buffer, entry)
+		end
+		return entry
+	end
 
 	writefile("ffff.ttf", game:HttpGet("https://github.com/weasely111/beta/raw/refs/heads/main/fs-tahoma-8px.ttf"))
 
@@ -610,17 +649,62 @@
 		end
 
 		function library:update_theme(theme, color)
-			for _, property in next, themes.utility[theme] do 
+			for _, property in next, themes.utility[theme] do
 
-				for m, object in next, property do 
+				for m, object in next, property do
 					if object[_] == themes.preset[theme] or object.ClassName == "UIGradient" then
-						object[_] = color 
+						object[_] = color
 					end
-				end 
-			end 
+				end
+			end
 
-			themes.preset[theme] = color 
-		end 
+			themes.preset[theme] = color
+
+			-- a flat repaint wipes the per-element two-tone colours, so re-spread
+			-- whenever the base colour of a two-toned channel moves
+			if library.two_tone and (theme == "accent" or theme == "glow") then
+				library:refresh_two_tone()
+			end
+		end
+
+		-- Two-tone: instead of one flat accent, every accented element takes the colour
+		-- at ITS horizontal position across the window — left edge = colour A, right edge
+		-- = colour B. Each element stays a flat colour (only the window glow and the top
+		-- bar are real gradients), which is what makes the whole menu read as one ramp.
+		--
+		-- This deliberately bypasses update_theme's `object[_] == preset` guard: that guard
+		-- exists so a repaint only touches elements still on the old colour, but here every
+		-- element is legitimately a DIFFERENT colour, so it would skip all of them.
+		function library:refresh_two_tone()
+			local root = library.two_tone_root
+			if not (library.two_tone and root and root.Parent) then return end
+			local x0, w = root.AbsolutePosition.X, root.AbsoluteSize.X
+			if w <= 0 then return end
+
+			local function spread(channel, a, b)
+				for property, objects in next, themes.utility[channel] do
+					for _, object in next, objects do
+						-- UIGradients hold a ColorSequence, not a Color3: give them the
+						-- full A->B ramp so big elements (glow, accent bar) sweep properly
+						if object.ClassName == "UIGradient" then
+							object[property] = rgbseq{rgbkey(0, a), rgbkey(1, b)}
+						else
+							local ok, pos = pcall(function() return object.AbsolutePosition end)
+							local ok2, size = pcall(function() return object.AbsoluteSize end)
+							if ok and ok2 then
+								-- sample at the element's CENTRE, clamped so popups and
+								-- panels parked outside the window still get an endpoint
+								local t = math.clamp(((pos.X + size.X * 0.5) - x0) / w, 0, 1)
+								object[property] = a:Lerp(b, t)
+							end
+						end
+					end
+				end
+			end
+
+			spread("accent", themes.preset.accent, library.accent_2 or themes.preset.accent)
+			spread("glow",   themes.preset.glow,   library.glow_2   or themes.preset.glow)
+		end
 
 		function library:connection(signal, callback)
 			local connection = signal:Connect(callback)
@@ -1402,7 +1486,10 @@
 					BorderColor3 = rgb(0, 0, 0),
 					AnchorPoint = vec2(0.5, 0),
 					Position = dim2(0.5, 0, 0, 20),
-					Size = dim2(0, 157, 0, 39),
+					-- width is hand-fitted to the button count: 4px pad + n*25 buttons +
+					-- (n-1)*5 gaps + 4px pad + 2px lining. Six panels => 187. Bump this
+					-- when a panel is added or the last icon spills outside the frame.
+					Size = dim2(0, 187, 0, 39),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
 				}); 
@@ -1648,7 +1735,7 @@
 					name = properties and properties.name or "Fem.Hook | ",
 					size = dim2(0, 604, 0, 628),
 					position = dim2(0, (camera.ViewportSize.X / 2) - 302 - 96, 0, (camera.ViewportSize.Y / 2) - 421 - 12),
-					image = "rbxassetid://98823308062942",
+					image = library:image("main.png", "rbxassetid://98823308062942"),
 				})
 
 				local items = main_window.items
@@ -1747,7 +1834,7 @@
 					anchor_point = vec2(0, 0),
 					size = dim2(0, 394, 0, 464),
 					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X + main_window.items.main_holder.AbsoluteSize.X + 2, 0, main_window.items.main_holder.AbsolutePosition.Y),
-					image = "rbxassetid://115194686863276",
+					image = library:image("style.png", "rbxassetid://115194686863276"),
 				})
 
 				local watermark = library:watermark({default = os.date('Fem.Hook |  - %b %d %Y - %H:%M:%S')})  
@@ -1927,7 +2014,7 @@
 					name = "Configurations", 
 					size = dim2(0, 324, 0, 410),
 					position = dim2(0, items.main_holder.AbsolutePosition.X + items.main_holder.AbsoluteSize.X + 2, 0, items.main_holder.AbsolutePosition.Y),
-					image = "rbxassetid://105199726008012",
+					image = library:image("configurations.png", "rbxassetid://105199726008012"),
 				}) 
 
 				local items = holder.items
@@ -2106,7 +2193,8 @@
 					anchor_point = vec2(0, 0),
 					size = dim2(0, 300, 0, 325),
 					position = dim2(0, style.items.main_holder.AbsolutePosition.X, 0, style.items.main_holder.AbsolutePosition.Y + style.items.main_holder.AbsoluteSize.Y + 2),
-					image = "rbxassetid://77684377836328",
+					-- the "</>" glyph is just what this icon set ships; it's the ESP Preview button
+					image = library:image("output.png", "rbxassetid://77684377836328"),
 				})  
 				
 				local items = holder.items
@@ -2121,7 +2209,7 @@
 					anchor_point = vec2(0, 0),
 					size = dim2(0, 529, 0, 445),
 					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X - 531, 0, main_window.items.main_holder.AbsolutePosition.Y),
-					image = "rbxassetid://107070078834415",
+					image = library:image("playerlist.png", "rbxassetid://107070078834415"),
 				})  
 				
 				local items = holder.items
@@ -2132,7 +2220,39 @@
 				section:dropdown({name = "Priority", items = {"Enemy", "Priority", "Neutral", "Friendly"}, default = "Neutral", flag = "PLAYERLIST_DROPDOWN", callback = function(text)
 					library.prioritize(text)
 				end})
-			--  
+			--
+
+			-- output / debug console
+				local holder = library:panel({
+					name = "Output",
+					anchor_point = vec2(0, 0),
+					size = dim2(0, 529, 0, 300),
+					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X - 531, 0, main_window.items.main_holder.AbsolutePosition.Y + 447),
+					image = library:image("output.png", "rbxassetid://77684377836328"),
+				})
+
+				local items = holder.items
+
+				local column = setmetatable(items, library):column()
+				local section = column:section({name = "Output"})
+
+				library.console = section:console({height = 190})
+
+				section:button_holder({})
+				section:button({name = "Clear Output", callback = function()
+					library.console.clear()
+				end})
+
+				-- replay anything logged before this panel existed, so the log reads in
+				-- real order instead of starting from whenever the UI happened to build
+				for _, entry in next, library.log_buffer do
+					library.console.add(entry.text, entry.level)
+				end
+				library.log_buffer = {}
+
+				library:log("Initializing " .. tostring((properties and properties.name) or "menu") .. "...", "INFO")
+				library:log("Loaded successfully!", "SUCCESS")
+			--
 
 			return setmetatable(window, library)
 		end
@@ -4957,11 +5077,14 @@
 					Parent = alpha_drag,
 					ScaleType = Enum.ScaleType.Tile,
 					BorderColor3 = rgb(0, 0, 0),
-					Image = "rbxassetid://18274452449",
+					Image = library:image("transparency.png", "rbxassetid://18274452449"),
 					BackgroundTransparency = 1,
 					Name = "alphaind",
 					Size = dim2(1, 0, 1, 0),
-					TileSize = dim2(0, 6, 0, 6),
+					-- transparency.png is a 10x10 checker (two 5px squares), so tiling at
+					-- its native 10px keeps the pattern pixel-exact. The old 6px tile
+					-- resampled a 10px source and came out soft.
+					TileSize = dim2(0, 10, 0, 10),
 					BorderSizePixel = 0,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
@@ -5060,6 +5183,24 @@
 					BackgroundColor3 = themes.preset.outline
 				}) library:apply_theme(outline, "outline", "BackgroundColor3") 
 				
+				-- checker UNDER the preview swatch: the swatch itself is drawn at the
+				-- picked alpha, so a half-transparent colour shows the board through it
+				-- and you can actually see what the alpha is doing without dragging.
+				library:create("ImageLabel", {
+					Parent = outline,
+					Name = "",
+					ScaleType = Enum.ScaleType.Tile,
+					TileSize = dim2(0, 10, 0, 10),
+					Image = library:image("transparency.png", "rbxassetid://18274452449"),
+					Position = dim2(0, 1, 0, 1),
+					Size = dim2(1, -2, 1, -2),
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					ZIndex = 1,
+					BorderColor3 = rgb(0, 0, 0),
+					BackgroundColor3 = rgb(255, 255, 255)
+				})
+
 				local visualize = library:create("Frame", {
 					Parent = outline,
 					Size = dim2(1, -2, 1, -2),
@@ -5068,6 +5209,7 @@
 					BorderColor3 = rgb(0, 0, 0),
 					Position = dim2(0, 1, 0, 1),
 					BorderSizePixel = 0,
+					ZIndex = 2,
 					BackgroundColor3 = rgb(0, 221, 255)
 				})
 				
@@ -5198,7 +5340,8 @@
 				alpha_drag.BackgroundColor3 = Color3.fromHSV(h, s, v)
 				
 				visualize.BackgroundColor3 = Color
-				handler.BackgroundColor3 = Color 
+				visualize.BackgroundTransparency = 1 - a   -- let the checker read through
+				handler.BackgroundColor3 = Color
 
 				colorpicker.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
 				
@@ -6480,6 +6623,146 @@
 
 			return setmetatable(cfg, library)
 		end 
+
+		-- Console: a scrolling, timestamped log the script pushes lines into (see
+		-- library:log). Each line is coloured by level so a wall of output still scans.
+		function library:console(options)
+			options = options or {}
+			local cfg = {
+				height = options.height or 200,
+				max_lines = options.max_lines or 200,
+				lines = {},
+			}
+
+			local LEVELS = {
+				INFO    = rgb(90, 150, 255),
+				WARN    = rgb(255, 200, 60),
+				SUCCESS = rgb(90, 230, 120),
+				ERROR   = rgb(255, 80, 80),
+				DEBUG   = rgb(170, 170, 170),
+			}
+
+			-- outline -> inline -> gradient body, the same lining as embedded_box so it
+			-- sits flush in a section
+			local box = library:create("Frame", {
+				Parent = self.holder,
+				Name = "",
+				Size = dim2(1, -8, 0, cfg.height),
+				BorderSizePixel = 0,
+				BorderColor3 = rgb(0, 0, 0),
+				BackgroundColor3 = themes.preset.outline
+			}) library:apply_theme(box, "outline", "BackgroundColor3")
+
+			local inline = library:create("Frame", {
+				Parent = box,
+				Name = "",
+				Position = dim2(0, 1, 0, 1),
+				Size = dim2(1, -2, 1, -2),
+				BorderSizePixel = 0,
+				BorderColor3 = rgb(0, 0, 0),
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(inline, "inline", "BackgroundColor3")
+
+			local bg = library:create("Frame", {
+				Parent = inline,
+				Name = "",
+				Position = dim2(0, 1, 0, 1),
+				Size = dim2(1, -2, 1, -2),
+				BorderSizePixel = 0,
+				BorderColor3 = rgb(0, 0, 0),
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			local grad = library:create("UIGradient", {
+				Parent = bg,
+				Rotation = 90,
+				Color = rgbseq{rgbkey(0, rgb(41, 41, 55)), rgbkey(1, rgb(35, 35, 47))}
+			}) library:apply_theme(grad, "contrast", "Color")
+
+			local sf = library:create("ScrollingFrame", {
+				Parent = bg,
+				Name = "",
+				Active = true,
+				BackgroundTransparency = 1,
+				Size = dim2(1, 0, 1, 0),
+				BorderSizePixel = 0,
+				BorderColor3 = rgb(0, 0, 0),
+				MidImage = "rbxassetid://103468666327206",
+				TopImage = "rbxassetid://103468666327206",
+				BottomImage = "rbxassetid://103468666327206",
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				CanvasSize = dim2(0, 0, 0, 0),
+				ScrollBarThickness = 2,
+				ScrollBarImageColor3 = themes.preset.accent,
+				BackgroundColor3 = rgb(255, 255, 255)
+			}) library:apply_theme(sf, "accent", "ScrollBarImageColor3")
+
+			library:create("UIListLayout", {
+				Parent = sf,
+				Padding = dim(0, 2),
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			library:create("UIPadding", {
+				Parent = sf,
+				PaddingTop = dim(0, 4),
+				PaddingBottom = dim(0, 4),
+				PaddingLeft = dim(0, 6),
+				PaddingRight = dim(0, 4)
+			})
+
+			function cfg.add(text, level)
+				level = string.upper(tostring(level or "INFO"))
+
+				-- raw Instance.new, NOT library:create: create() registers every TextLabel
+				-- into themes.utility and library.instances, and those lists are never
+				-- pruned on Destroy. A console emitting thousands of lines would grow them
+				-- forever and drag down every theme repaint. Line colour is per-level
+				-- anyway, so there's nothing for the theme system to manage here.
+				local line = Instance.new("TextLabel")
+				line.FontFace = library.font
+				line.TextColor3 = LEVELS[level] or LEVELS.INFO
+				line.Text = string.format("[%s] [%s] %s", os.date("%H:%M:%S"), level, tostring(text))
+				line.BackgroundTransparency = 1
+				line.Size = dim2(1, -6, 0, 0)
+				line.AutomaticSize = Enum.AutomaticSize.Y
+				line.TextXAlignment = Enum.TextXAlignment.Left
+				line.TextWrapped = true
+				line.TextSize = 12
+				line.BorderSizePixel = 0
+				line.LayoutOrder = #cfg.lines + 1
+
+				local stroke = Instance.new("UIStroke")
+				stroke.Color = themes.preset.text_outline
+				stroke.LineJoinMode = Enum.LineJoinMode.Miter
+				stroke.Parent = line
+
+				line.Parent = sf
+				insert(cfg.lines, line)
+
+				-- cap the history: without this a chatty script grows the GUI unbounded
+				while #cfg.lines > cfg.max_lines do
+					local old = remove(cfg.lines, 1)
+					pcall(function() old:Destroy() end)
+				end
+
+				-- stick to the newest line. CanvasPosition clamps to the canvas, so an
+				-- absurd Y just means "the bottom" without having to measure it.
+				sf.CanvasPosition = vec2(0, 1e6)
+				return line
+			end
+
+			function cfg.clear()
+				for _, line in next, cfg.lines do
+					pcall(function() line:Destroy() end)
+				end
+				cfg.lines = {}
+			end
+
+			cfg.holder = sf
+
+			return setmetatable(cfg, library)
+		end
 
 		function library:textbox(options)
 			local cfg = {
