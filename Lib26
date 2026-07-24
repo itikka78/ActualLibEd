@@ -232,17 +232,29 @@
 		local hit = image_cache[name]
 		if hit ~= nil then return hit or fallback end
 		local id
+		-- a real PNG opens with the 0x89 'PNG' magic; a GitHub 404 is a short
+		-- "404: Not Found" TEXT body. Some executors return that body from HttpGet
+		-- instead of erroring, so we validate the BYTES before trusting a file.
+		local PNG_MAGIC = "\137PNG\r\n\26\n"
 		pcall(function()
 			local path = library.directory .. "/images/" .. name
-			if not isfile(path) then
+			local need_download = not isfile(path)
+			if not need_download then
+				-- validate a file already on disk too: a prior session (before this
+				-- check) may have written a 404 body here, which would otherwise load
+				-- as a blank asset. Purge a bad one so it re-downloads (and a truly
+				-- missing image then 404s -> cached as a miss -> caller gets fallback).
+				local ok_read, existing = pcall(readfile, path)
+				if ok_read and type(existing) == "string" and existing:sub(1, 8) ~= PNG_MAGIC then
+					pcall(delfile, path)
+					need_download = true
+				end
+				-- if readfile failed, assume the file is fine (don't nuke a valid icon)
+			end
+			if need_download then
 				local data = game:HttpGet(library.image_url .. name)
-				-- Reject a missing file: GitHub raw answers a 404 with a short
-				-- "404: Not Found" TEXT body, and some executors hand that back from
-				-- HttpGet instead of erroring. Writing it would produce a valid-looking
-				-- asset that renders blank. A real PNG opens with the 0x89 'PNG' magic,
-				-- so anything else = not found -> leave id nil (cached as a miss).
-				if type(data) ~= "string" or data:sub(1, 8) ~= "\137PNG\r\n\26\n" then
-					return
+				if type(data) ~= "string" or data:sub(1, 8) ~= PNG_MAGIC then
+					return   -- leave id nil -> cached as a miss
 				end
 				writefile(path, data)
 			end
