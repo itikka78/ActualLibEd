@@ -4233,6 +4233,77 @@
 			return setmetatable(cfg, library)
 		end
 
+		-- library:subgroup — inline replacement for :plus. Instead of a floating "+" popup,
+		-- the sub-options render indented directly UNDER the driving element (reusing the
+		-- indent_group guide-rail look), and their visibility follows the driver's state:
+		-- a toggle reveals them while ON, a dropdown while it has a selection. Same chaining
+		-- API as :plus — :toggle/:slider/:dropdown/... parent INTO cfg.holder:
+		--   someToggle:subgroup({name = "Options"})
+		--       :slider({name = "Volume", flag = "opt_vol", min = 0, max = 10})
+		-- (options.name/max_height/width/height are accepted for drop-in compatibility with
+		-- :plus but only the inline look is drawn — height is automatic.)
+		function library:subgroup(options)
+			options = options or {}
+			local cfg = { open = false }
+			-- the driver (toggle/dropdown) exposes parent_holder = its section holder, so the
+			-- group lands right below it in creation order. Fall back to self.holder so a bare
+			-- :subgroup still parents somewhere sane.
+			local parent_holder = self.parent_holder or self.holder
+
+			local wrap = library:create("Frame", {
+				Parent = parent_holder,
+				Name = "",
+				Size = dim2(1, -8, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundTransparency = 1,
+				Visible = false,   -- hidden until the driver turns it on (UIListLayout skips it)
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			local rail = library:create("Frame", {
+				Parent = wrap,
+				Name = "",
+				Position = dim2(0, 5, 0, 0),
+				Size = dim2(0, 1, 1, -6),
+				BorderSizePixel = 0,
+				BackgroundColor3 = themes.preset.inline
+			}) library:apply_theme(rail, "inline", "BackgroundColor3")
+
+			local elements = library:create("Frame", {
+				Parent = wrap,
+				Name = "",
+				Position = dim2(0, 14, 0, 0),
+				Size = dim2(1, -14, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BorderSizePixel = 0,
+				BackgroundTransparency = 1,
+				BackgroundColor3 = rgb(255, 255, 255)
+			})
+
+			library:create("UIListLayout", {
+				Parent = elements,
+				Padding = dim(0, 4),
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder
+			})
+
+			cfg.holder = elements
+			cfg.current_holder = elements
+			cfg.wrap = wrap
+
+			function cfg.set_open(bool)
+				cfg.open = bool and true or false
+				wrap.Visible = cfg.open
+			end
+
+			-- bind to the driver's on/off (toggle) or selection (dropdown) state so it
+			-- reveals/hides automatically. attach_subgroup also sets the initial state.
+			if self.attach_subgroup then self.attach_subgroup(cfg) end
+
+			return setmetatable(cfg, library)
+		end
+
 		function library:slider(options)
 			local cfg = {
 				name = options.name or nil,
@@ -4514,7 +4585,11 @@
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
 				cfg["right_holder"] = right_components
-			
+				-- section holder + inline-subgroup registry (see library:subgroup): a subgroup
+				-- chained off this toggle parents into parent_holder and reveals while ON.
+				cfg.parent_holder = self.holder
+				cfg.subgroups = {}
+
 				local list = library:create("UIListLayout", {
 					Parent = right_components,
 					VerticalAlignment = Enum.VerticalAlignment.Center,
@@ -4642,13 +4717,25 @@
 			function cfg.set(bool)
 				library:tween(accent, {BackgroundTransparency = bool and 0 or 1})
 				flags[cfg.flag] = bool
-				
+
+				-- reveal/hide any inline subgroups chained off this toggle
+				if cfg.subgroups then
+					for _, sub in ipairs(cfg.subgroups) do sub.set_open(bool) end
+				end
+
 				cfg.callback(bool)
 			end
 
+			-- register an inline subgroup so it opens with this toggle (initial state
+			-- from the live flag, since the default was already applied above)
+			function cfg.attach_subgroup(sub)
+				insert(cfg.subgroups, sub)
+				sub.set_open(flags[cfg.flag] and true or false)
+			end
+
 			function cfg.set_element_visible(bool)
-				toggle_holder.Visible = bool 
-			end 
+				toggle_holder.Visible = bool
+			end
 		
 			library:connection(toggle_holder.MouseButton1Click, function()
 				library:ui_sound("click")
@@ -6032,6 +6119,11 @@
 
 			cfg.default = options.default or (cfg.multi and {cfg.items[1]}) or cfg.items[1] or nil
 
+			-- section holder + inline-subgroup registry (see library:subgroup): a subgroup
+			-- chained off this dropdown reveals while the dropdown has a selection.
+			cfg.parent_holder = self.holder
+			cfg.subgroups = {}
+
 			-- dropdown elements
 				local dropdown_REAL = library:create("TextLabel", {
 					Parent = parent,
@@ -6397,7 +6489,23 @@
 
 				text.Text = is_table and concat(selected, ", ") or selected[1] or "nun"
 				flags[cfg.flag] = is_table and selected or selected[1]
-				cfg.callback(flags[cfg.flag]) 
+
+				-- reveal/hide inline subgroups: open while anything is selected
+				if cfg.subgroups then
+					local has = #selected > 0
+					for _, sub in ipairs(cfg.subgroups) do sub.set_open(has) end
+				end
+
+				cfg.callback(flags[cfg.flag])
+			end
+
+			-- register an inline subgroup driven by this dropdown's selection state
+			function cfg.attach_subgroup(sub)
+				insert(cfg.subgroups, sub)
+				local v = flags[cfg.flag]
+				local has = (type(v) == "table" and #v > 0)
+					or (type(v) == "string" and v ~= "" and v ~= "nun")
+				sub.set_open(has and true or false)
 			end
 			
 			function cfg:refresh_options(refreshed_list) 
@@ -7639,4 +7747,4 @@
 	-- 
 -- 
 
-return library, themes;
+return library, themes; 
