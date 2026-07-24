@@ -4735,6 +4735,13 @@
 
 			function cfg.set_element_visible(bool)
 				toggle_holder.Visible = bool
+				-- hiding the toggle hides its inline subgroups; showing it restores them
+				-- to the toggle's live on/off state (not force-open)
+				if cfg.subgroups then
+					for _, sub in ipairs(cfg.subgroups) do
+						sub.set_open(bool and (flags[cfg.flag] and true or false))
+					end
+				end
 			end
 		
 			library:connection(toggle_holder.MouseButton1Click, function()
@@ -6446,12 +6453,20 @@
 			-- 
 				
 			function cfg.set_element_visible(bool)
-				dropdown_REAL.Visible = bool 
+				dropdown_REAL.Visible = bool
 
-				if main_text then 
+				if main_text then
 					main_text.Visible = bool
-				end 
-			end 
+				end
+				-- hiding the dropdown hides its inline subgroups; showing restores them
+				-- to the current selection state
+				if cfg.subgroups then
+					local v = flags[cfg.flag]
+					local has = (type(v) == "table" and #v > 0)
+						or (type(v) == "string" and v ~= "" and v ~= "nun")
+					for _, sub in ipairs(cfg.subgroups) do sub.set_open(bool and has) end
+				end
+			end
 
 			function cfg.set_visible(bool) 
 				library.current_element_open = cfg.ignore or cfg
@@ -7376,12 +7391,20 @@
 				Name = ""
 			})
 
-			function cfg.set(text) 
-				TextLabel.Text = text 
-			end 
-						
-			return setmetatable(cfg, library)   
-		end 
+			function cfg.set(text)
+				TextLabel.Text = text
+			end
+
+			-- section holder + subgroup support: a label has no on/off state, so a
+			-- subgroup chained off it renders as an always-open indented block (used
+			-- for header-style groupings like "Traders").
+			cfg.parent_holder = self.holder
+			function cfg.attach_subgroup(sub)
+				sub.set_open(true)
+			end
+
+			return setmetatable(cfg, library)
+		end
 
 		function library:playerlist(options) 
 			local cfg = {
