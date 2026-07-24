@@ -235,7 +235,16 @@
 		pcall(function()
 			local path = library.directory .. "/images/" .. name
 			if not isfile(path) then
-				writefile(path, game:HttpGet(library.image_url .. name))
+				local data = game:HttpGet(library.image_url .. name)
+				-- Reject a missing file: GitHub raw answers a 404 with a short
+				-- "404: Not Found" TEXT body, and some executors hand that back from
+				-- HttpGet instead of erroring. Writing it would produce a valid-looking
+				-- asset that renders blank. A real PNG opens with the 0x89 'PNG' magic,
+				-- so anything else = not found -> leave id nil (cached as a miss).
+				if type(data) ~= "string" or data:sub(1, 8) ~= "\137PNG\r\n\26\n" then
+					return
+				end
+				writefile(path, data)
 			end
 			id = getcustomasset(path)
 		end)
@@ -254,7 +263,19 @@
 		local custom = style == "Custom"
 		for _, e in ipairs(library.icon_panels) do
 			if e.icon and e.icon.Parent then
-				e.icon.Image = library:image(custom and e.custom or e.base, e.fallback)
+				if custom then
+					-- nil fallback so a missing custom file resolves to nil (not the base
+					-- rbxassetid), letting us detect the miss, use the basic icon instead,
+					-- and report exactly which custom file wasn't found.
+					local img = library:image(e.custom, nil)
+					if img == nil then
+						library:log("Icon Style: '" .. e.custom .. "' not found - using basic icon", "WARN")
+						img = library:image(e.base, e.fallback)
+					end
+					e.icon.Image = img
+				else
+					e.icon.Image = library:image(e.base, e.fallback)
+				end
 			end
 		end
 	end
@@ -1748,10 +1769,9 @@
 			-- main window
 				-- each panel registers its dock ImageLabel + base filename so Style > Icon
 				-- Style can re-skin the whole dock. custom = the "<name>2.png" variant.
-				local function register_icon(panel, base, fallback)
+				local function register_icon(panel, base, custom, fallback)
 					library.icon_panels[#library.icon_panels + 1] = {
-						icon = panel.items.Icon, base = base,
-						custom = (base:gsub("%.png$", "2.png")), fallback = fallback,
+						icon = panel.items.Icon, base = base, custom = custom, fallback = fallback,
 					}
 				end
 
@@ -1761,7 +1781,7 @@
 					position = dim2(0, (camera.ViewportSize.X / 2) - 302 - 96, 0, (camera.ViewportSize.Y / 2) - 421 - 12),
 					image = library:image("main.png", "rbxassetid://98823308062942"),
 				})
-				register_icon(main_window, "main.png", "rbxassetid://98823308062942")
+				register_icon(main_window, "main.png", "home2.png", "rbxassetid://98823308062942")
 
 				local items = main_window.items
 
@@ -1861,7 +1881,7 @@
 					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X + main_window.items.main_holder.AbsoluteSize.X + 2, 0, main_window.items.main_holder.AbsolutePosition.Y),
 					image = library:image("style.png", "rbxassetid://115194686863276"),
 				})
-				register_icon(style, "style.png", "rbxassetid://115194686863276")
+				register_icon(style, "style.png", "style2.png", "rbxassetid://115194686863276")
 
 				local watermark = library:watermark({default = os.date('Fem.Hook |  - %b %d %Y - %H:%M:%S')})  
 
@@ -1997,10 +2017,10 @@
 				--
 
 				-- other tab
-					-- dock/panel icon set. Basic = the shipped icons; Custom = the
-					-- "<name>2.png" variants (upload main2/style2/configurations2/output2/
-					-- playerlist2.png to the images repo). A missing custom file falls back to
-					-- the base icon, so Custom just looks unchanged until the file exists.
+					-- dock/panel icon set. Basic = the shipped icons; Custom = the variant set:
+					-- home2 (main), style2, configs2 (configurations), esp_preview2 (ESP button),
+					-- output2 (Output), playerlist2. Any custom file that isn't in the images repo
+					-- falls back to its basic icon and logs which one was missing to the console.
 					other_section:dropdown({name = "Icon Style", flag = "icon_style", items = {"Basic", "Custom"}, default = "Basic",
 						callback = function(v) library:apply_icon_style(v) end})
 					-- global animation rate: every animated effect (ESP box gradients,
@@ -2054,7 +2074,7 @@
 					position = dim2(0, items.main_holder.AbsolutePosition.X + items.main_holder.AbsoluteSize.X + 2, 0, items.main_holder.AbsolutePosition.Y),
 					image = library:image("configurations.png", "rbxassetid://105199726008012"),
 				})
-				register_icon(holder, "configurations.png", "rbxassetid://105199726008012")
+				register_icon(holder, "configurations.png", "configs2.png", "rbxassetid://105199726008012")
 
 				local items = holder.items
 
@@ -2235,11 +2255,11 @@
 					-- the "</>" glyph is just what this icon set ships; it's the ESP Preview button
 					image = library:image("output.png", "rbxassetid://77684377836328"),
 				})
-				register_icon(holder, "output.png", "rbxassetid://77684377836328")
+				register_icon(holder, "output.png", "esp_preview2.png", "rbxassetid://77684377836328")
 
 				local items = holder.items
-				
-				local column = setmetatable(items, library):column() 
+
+				local column = setmetatable(items, library):column()
 				window.esp_section = column:section({name = "Main"})
 			--  
 
@@ -2251,7 +2271,7 @@
 					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X - 531, 0, main_window.items.main_holder.AbsolutePosition.Y),
 					image = library:image("playerlist.png", "rbxassetid://107070078834415"),
 				})
-				register_icon(holder, "playerlist.png", "rbxassetid://107070078834415")
+				register_icon(holder, "playerlist.png", "playerlist2.png", "rbxassetid://107070078834415")
 
 				local items = holder.items
 
@@ -2271,7 +2291,7 @@
 					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X - 531, 0, main_window.items.main_holder.AbsolutePosition.Y + 447),
 					image = library:image("output.png", "rbxassetid://77684377836328"),
 				})
-				register_icon(holder, "output.png", "rbxassetid://77684377836328")
+				register_icon(holder, "output.png", "output2.png", "rbxassetid://77684377836328")
 
 				local items = holder.items
 
