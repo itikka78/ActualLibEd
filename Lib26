@@ -3294,10 +3294,15 @@
 						local p = fade_props(o)
 						if p then
 							for _, prop in next, p do
-								local ok, target = pcall(function() return o[prop] end)
-								if ok and target < 1 then
+								local attr = "delta_fade_" .. prop
+								local rest = o:GetAttribute(attr)
+								if rest == nil then
+									local ok, cur = pcall(function() return o[prop] end)
+									if ok then rest = cur; pcall(function() o:SetAttribute(attr, rest) end) end
+								end
+								if rest ~= nil and rest < 1 then
 									o[prop] = 1
-									tween_service:Create(o, info, {[prop] = target}):Play()
+									tween_service:Create(o, info, {[prop] = rest}):Play()
 								end
 							end
 						end
@@ -7679,32 +7684,44 @@
 					BackgroundColor3 = themes.preset.outline
 				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
 
-				path.instance = TextButton 
-				path.line = line 
-				path.priority = "Neutral"
+				path.instance = TextButton
+				path.line = line
+				path.priority = tostring(player) ~= lp.Name and "Neutral" or "LocalPlayer"
 				path.priority_text = priority_text
 				-- library.selected_player = players[tostring(player)]
 				
 				TextButton.MouseButton1Click:Connect(function()
-					if player_name == lp.Name then 
-						return 
-					end 
+					local is_self = player_name.Text == lp.Name
 
-					if selected_button then 
-						selected_button.TextColor3 = themes.preset.text 
-						selected_button = nil 
-					end     
+					if selected_button then
+						selected_button.TextColor3 = themes.preset.text
+						selected_button = nil
+					end
 
-					selected_button = player_name 
-					player_name.TextColor3 = themes.preset.accent 
+					selected_button = player_name
+					player_name.TextColor3 = themes.preset.accent
 
 					library.selected_player = player_name.Text
-					library.config_flags["PLAYERLIST_DROPDOWN"](path.priority_text.Text)
+					library.selected_is_local = is_self
+					-- clicking yourself just shows you as the local player: don't sync the
+					-- Priority dropdown to a non-item value and don't let it reclassify you
+					if not is_self then
+						library.config_flags["PLAYERLIST_DROPDOWN"](path.priority_text.Text)
+					end
 
-					if cfg.labels.name then 
-						cfg.labels.name.set("User: " .. player_name.Text)
-						cfg.labels.display.set("DisplayName: " .. players[player_name.Text].DisplayName)
-						cfg.labels.uid.set("User Id: " .. players[player_name.Text].UserId)
+					if cfg.labels.player then
+						local obj  = players[player_name.Text]
+						local disp = (obj and obj.DisplayName) or player_name.Text
+						local uid  = (obj and obj.UserId) or 0
+						cfg.labels.player.set("Player: " .. disp .. " (@" .. player_name.Text .. ")")
+						-- KD / Hours are game-specific, so Delta fills the stats line via this
+						-- hook; without it we still show the User ID we already know.
+						local stats
+						if library.playerlist_stats then
+							local ok, s = pcall(library.playerlist_stats, player_name.Text)
+							if ok and type(s) == "string" then stats = s end
+						end
+						cfg.labels.stats.set(stats or ("User ID: " .. tostring(uid)))
 					end
 				end)
 
@@ -7731,16 +7748,20 @@
 				path = nil 
 			end 
 
-			function library.prioritize(text) 
-				if not library.selected_player then 
-					return 
-				end 
+			function library.prioritize(text)
+				if not library.selected_player then
+					return
+				end
+				if library.selected_is_local then   -- can't reclassify yourself
+					return
+				end
 
 				local path = library.playerlist_data[library.selected_player]
+				if not path then return end
 				path.priority_text.Text = text
 				path.priority_text.TextColor3 = patterns[text]
 				path.priority = text
-			end 
+			end
 
 			function library.get_priority(player) 
 				local path = library.playerlist_data[tostring(player)]
@@ -7761,9 +7782,8 @@
 			self:textbox({name = "Search", callback = function(txt)
 				cfg.search(txt)
 			end})
-			cfg.labels.name = self:label({name = "Name: ??"})
-			cfg.labels.display = self:label({name = "Display Name: ??"})
-			cfg.labels.uid = self:label({name = "User Id: ??"})
+			cfg.labels.player = self:label({name = "Player: ??"})
+			cfg.labels.stats  = self:label({name = "User ID: ?? / KD: ?? / Hours Played: ??"})
 
 			return setmetatable(cfg, library)
 		end 
