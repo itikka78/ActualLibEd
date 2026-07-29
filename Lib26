@@ -2144,8 +2144,19 @@
 				-- fonts tab
 					local defaultFont = library.font
 					local font_holder = nil
+					local fontBold = false          -- Bold toggle state
+					local lastBaseFont = defaultFont -- last picked family (pre-bold), so the toggle can re-weight it
+
+					-- re-weight a font to Bold when the toggle is on (leaves it as-is otherwise)
+					local function withBold(font)
+						if not fontBold then return font end
+						local ok, bf = pcall(function() return Font.new(font.Family, Enum.FontWeight.Bold, font.Style) end)
+						return (ok and bf) or font
+					end
 
 					local function applyLibFont(font)
+						lastBaseFont = font
+						font = withBold(font)
 						library.font = font
 						local function updateGui(gui)
 							pcall(function()
@@ -2180,6 +2191,15 @@
 						["[Nunito]"]          = function() return Font.new("rbxasset://fonts/families/Nunito.json") end,
 					}
 					local PRESET_ORDER = {"[Default]","[Source Sans Pro]","[Inconsolata]","[Roboto Mono]","[Ubuntu]","[Montserrat]","[Nunito]"}
+					-- append EVERY built-in Roblox font family (the whole Enum.Font list) so the
+					-- picker offers all of them, not just the seven hand-picked presets above
+					for _, f in ipairs(Enum.Font:GetEnumItems()) do
+						local nm = "[" .. f.Name .. "]"
+						if f ~= Enum.Font.Unknown and not PRESET_FONTS[nm] then
+							PRESET_FONTS[nm]  = function() return Font.fromEnum(f) end
+							PRESET_ORDER[#PRESET_ORDER + 1] = nm
+						end
+					end
 
 					function library:font_list_update()
 						if not font_holder then return end
@@ -2201,6 +2221,9 @@
 					end
 
 					font_holder = fontSec:list({flag = "lib_font_list"})
+					-- Bold toggle: re-weights the currently applied family to Bold (or back)
+					fontSec:toggle({name = "Bold", flag = "lib_font_bold", default = false,
+						callback = function(v) fontBold = v == true; applyLibFont(lastBaseFont) end})
 					fontSec:button_holder({})
 					fontSec:button({name = "Apply Font", callback = function()
 						local sel = flags["lib_font_list"]
