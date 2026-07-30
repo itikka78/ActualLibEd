@@ -484,9 +484,16 @@
 			}) library:apply_theme(library._guide_h, "accent", "BackgroundColor3")
 		end
 
-		function library:draggify(frame)
+		function library:draggify(frame, key)
 			local start_size = frame.Position
 			local start
+
+			-- config-saved positions: a draggable passed a stable `key` is registered here so
+			-- capture_ui_positions can snapshot its Position on save and restore it on load.
+			if key then
+				library.ui_draggables = library.ui_draggables or {}
+				library.ui_draggables[key] = frame
+			end
 
 			frame.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -658,8 +665,13 @@
 		end 
 
 		function library:get_config()
+			-- snapshot the live UI positions (dock, keybind list, every window panel,
+			-- watermark) into flags["ui_positions"] so they save with the config
+			if type(library.capture_ui_positions) == "function" then
+				pcall(function() library:capture_ui_positions() end)
+			end
 			local Config = {}
-		
+
 			for _, v in flags do
 				if type(v) == "table" and v.key then
 					Config[_] = {active = v.active, mode = v.mode, key = tostring(v.key)}
@@ -694,8 +706,48 @@
 			if type(library.apply_saved_font) == "function" then
 				pcall(function() library:apply_saved_font() end)
 			end
-		end 
-		
+		end
+
+		-- UI position persistence. Any draggable registered via draggify(frame, key) — the
+		-- dock, keybind list, every window panel and the watermark — gets its Position saved
+		-- with the config and restored on load. Positions are offset-only (draggify always
+		-- writes dim2(0,x,0,y)), so capture stores {xOffset, yOffset} and restore is a plain
+		-- set. capture runs inside get_config; the config_flags setter below runs on load.
+		function library:capture_ui_positions()
+			if not library.ui_draggables then return end
+			local out = {}
+			for key, frame in pairs(library.ui_draggables) do
+				if frame and frame.Parent then
+					local ok, pos = pcall(function() return frame.Position end)
+					local ok2, size = pcall(function() return frame.Size end)
+					if ok then
+						local entry = { pos.X.Offset, pos.Y.Offset }
+						-- entries 3 & 4 hold the frame's size (offset) so RESIZED windows persist
+						-- too. All registered draggables are offset-sized roots (scale 0), so the
+						-- offset alone round-trips; older configs without them skip size restore.
+						if ok2 then entry[3] = size.X.Offset; entry[4] = size.Y.Offset end
+						out[key] = entry
+					end
+				end
+			end
+			flags["ui_positions"] = out
+		end
+		library.config_flags["ui_positions"] = function(v)
+			if type(v) ~= "table" then return end
+			flags["ui_positions"] = v   -- keep it so a later re-save carries it forward
+			if not library.ui_draggables then return end
+			for key, pos in pairs(v) do
+				local frame = library.ui_draggables[key]
+				if frame and frame.Parent and type(pos) == "table" then
+					local x, y = tonumber(pos[1]), tonumber(pos[2])
+					if x and y then pcall(function() frame.Position = dim2(0, x, 0, y) end) end
+					-- restore saved size (offset) if present (newer configs only)
+					local w, h = tonumber(pos[3]), tonumber(pos[4])
+					if w and h then pcall(function() frame.Size = dim2(0, w, 0, h) end) end
+				end
+			end
+		end
+
 		-- Autoload: a small marker file (autoload.txt in the menu directory) holds the name
 		-- of the config to load automatically when the script runs. Set/cleared by the two
 		-- buttons in the Configs tab; consumed once at load by delta calling library:autoload().
@@ -956,7 +1008,10 @@
 						BorderSizePixel = 0,
 						BackgroundColor3 = themes.preset.outline
 					})
-					library:draggify(items.main_holder)
+					-- config-saved position: key by an explicit options.pos_key (the main window
+					-- passes one so a version-bumped name doesn't lose its saved spot) or the
+					-- panel's name, which is stable for Style/Config/ESP Preview/Playerlist/Output
+					library:draggify(items.main_holder, options.pos_key or ("panel:" .. cfg.name))
 					library:make_resizable(items.main_holder)
 
 					local Close = library:create( "TextButton" , {
@@ -1247,7 +1302,7 @@
 					Size = dim2(0, 322, 0, 147);
 					BorderSizePixel = 0;
 					BackgroundColor3 = themes.preset.outline
-				});	library:apply_theme(items.Window, "outline", "BackgroundColor3"); library:draggify(items.Window)
+				});	library:apply_theme(items.Window, "outline", "BackgroundColor3"); library:draggify(items.Window, "indicator")
 				
 				items.InfoTitle = library:create( "TextLabel" , {
 					FontFace = library.font;
@@ -1573,7 +1628,10 @@
 					Visible = true,
 					BorderColor3 = rgb(0, 0, 0),
 					AnchorPoint = vec2(0.5, 0),
-					Position = dim2(0.5, 0, 0, 20),
+					-- top-center, dropped below the Roblox topbar. This gui is IgnoreGuiInset
+					-- now, so offset 0 = the true screen top; 56 = ~the old 20 + 36px inset,
+					-- putting the dock back under the topbar instead of jammed at the edge.
+					Position = dim2(0.5, 0, 0, 56),
 					-- width is hand-fitted to the button count: 4px pad + n*25 buttons +
 					-- (n-1)*5 gaps + 4px pad + 2px lining. Six panels => 187. Bump this
 					-- when a panel is added or the last icon spills outside the frame.
@@ -1584,8 +1642,8 @@
 
 				library:apply_theme(dock_outline, "outline", "BackgroundColor3"); 
 				dock_outline.Position = dim2(0, dock_outline.AbsolutePosition.X, 0, dock_outline.AbsolutePosition.Y); 
-				dock_outline.AnchorPoint = vec2(0, 0); 
-				library:draggify(dock_outline);
+				dock_outline.AnchorPoint = vec2(0, 0);
+				library:draggify(dock_outline, "dock");
 
 				local dock_inline = library:create("Frame", {
 					Parent = dock_outline,
@@ -1677,10 +1735,10 @@
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
 				})
-				library:apply_theme(outline, "outline", "BackgroundColor3") 
-				library:draggify(outline)
+				library:apply_theme(outline, "outline", "BackgroundColor3")
+				library:draggify(outline, "keybind_list")
 				library:make_resizable(outline)
-				library.keybind_list_frame = outline 
+				library.keybind_list_frame = outline
 				
 				local inline = library:create("Frame", {
 					Parent = outline,
@@ -1829,6 +1887,7 @@
 
 				local main_window = library:panel({
 					name = properties and properties.name or "Fem.Hook | ",
+					pos_key = "MainWindow",   -- stable key: the name carries the version, which changes
 					size = dim2(0, 604, 0, 628),
 					position = dim2(0, (camera.ViewportSize.X / 2) - 302 - 96, 0, (camera.ViewportSize.Y / 2) - 421 - 12),
 					image = library:image("main.png", "rbxassetid://98823308062942"),
@@ -2473,7 +2532,7 @@
 				BackgroundColor3 = themes.preset.outline
 			}) library:apply_theme(watermark_outline, "outline", "BackgroundColor3") 
 			watermark_outline.Position = dim_offset(watermark_outline.AbsolutePosition.X, watermark_outline.AbsolutePosition.Y)
-			library:draggify(watermark_outline)
+			library:draggify(watermark_outline, "watermark")
 
 			local watermark_inline = library:create("Frame", {
 				Parent = watermark_outline,
