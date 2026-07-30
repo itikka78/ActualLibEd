@@ -3387,37 +3387,47 @@
 				-- Quint fade-in of the opened tab's content (ExampleLib FadeDescendants port):
 				-- every descendant's transparency props snap to 1 then tween back to their real
 				-- value, so the page eases in instead of popping.
+				--
+				-- The fade LIST — {object, transparency prop, resting value} for each descendant —
+				-- is computed ONCE per tab and cached on cfg._fade_list. The old code re-walked
+				-- GetDescendants and did a GetAttribute/SetAttribute (+ pcall'd read) per prop on
+				-- EVERY switch; that per-switch walk over a heavy tab was the tab-change hitch.
+				-- A tab's element set is fixed after build, so the list never needs rebuilding.
 				do
 					local info = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-					local function fade_props(o)
-						if o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox") then
-							return {"TextTransparency", "BackgroundTransparency"}
-						elseif o:IsA("ImageLabel") or o:IsA("ImageButton") then
-							return {"ImageTransparency", "BackgroundTransparency"}
-						elseif o:IsA("ScrollingFrame") or o:IsA("Frame") then
-							return {"BackgroundTransparency"}
-						elseif o:IsA("UIStroke") then
-							return {"Transparency"}
+					local list = cfg._fade_list
+					if not list then
+						list = {}
+						local function fade_props(o)
+							if o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox") then
+								return {"TextTransparency", "BackgroundTransparency"}
+							elseif o:IsA("ImageLabel") or o:IsA("ImageButton") then
+								return {"ImageTransparency", "BackgroundTransparency"}
+							elseif o:IsA("ScrollingFrame") or o:IsA("Frame") then
+								return {"BackgroundTransparency"}
+							elseif o:IsA("UIStroke") then
+								return {"Transparency"}
+							end
 						end
-					end
-					local objs = section_holder:GetDescendants()
-					objs[#objs + 1] = section_holder
-					for _, o in next, objs do
-						local p = fade_props(o)
-						if p then
-							for _, prop in next, p do
-								local attr = "delta_fade_" .. prop
-								local rest = o:GetAttribute(attr)
-								if rest == nil then
+						local objs = section_holder:GetDescendants()
+						objs[#objs + 1] = section_holder
+						for _, o in next, objs do
+							local p = fade_props(o)
+							if p then
+								for _, prop in next, p do
 									local ok, cur = pcall(function() return o[prop] end)
-									if ok then rest = cur; pcall(function() o:SetAttribute(attr, rest) end) end
-								end
-								if rest ~= nil and rest < 1 then
-									o[prop] = 1
-									tween_service:Create(o, info, {[prop] = rest}):Play()
+									if ok and type(cur) == "number" and cur < 1 then
+										list[#list + 1] = {o = o, prop = prop, rest = cur}
+									end
 								end
 							end
 						end
+						cfg._fade_list = list
+					end
+					for i = 1, #list do
+						local e = list[i]
+						e.o[e.prop] = 1
+						tween_service:Create(e.o, info, {[e.prop] = e.rest}):Play()
 					end
 				end
 
@@ -4834,6 +4844,11 @@
 			function cfg.set(bool)
 				library:tween(accent, {BackgroundTransparency = bool and 0 or 1})
 				flags[cfg.flag] = bool
+				-- keep the click-state tracker in sync. Without this, a config/autoload that
+				-- sets a toggle via cfg.set leaves cfg.enabled stale, so the NEXT click computes
+				-- `not <stale>` and eats/inverts itself — the "toggle stuck at wrong state after
+				-- rejoin" bug. Now set() is the single source of truth whoever calls it.
+				cfg.enabled = bool
 
 				-- reveal/hide any inline subgroups chained off this toggle
 				if cfg.subgroups then
