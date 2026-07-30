@@ -441,6 +441,11 @@
 				Parent = gethui(),
 				Name = "",
 				DisplayOrder = 2000000,
+				-- MUST match the windows' coord space (they're IgnoreGuiInset now): the Aero
+				-- ghost + center guides live here and are positioned from the frame's no-inset
+				-- Position offsets. Without this the ghost renders ~36px (the topbar inset) off,
+				-- so snapping to the top overshoots and the window lands partly off-screen.
+				IgnoreGuiInset = true,
 			})
 			local outline = library:create("Frame", {
 				Parent = g,
