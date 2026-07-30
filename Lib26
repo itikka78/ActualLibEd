@@ -1201,7 +1201,8 @@
 			Enabled = true,
 			Parent = gethui(),
 			Name = "",
-			DisplayOrder = 999999, 
+			IgnoreGuiInset = true,   -- full-screen coord space so the window (and Aero Snap) can drag up past the topbar
+			DisplayOrder = 999999,
 		})
 
 		local notif_holder = library:create("ScreenGui", {
@@ -2399,7 +2400,9 @@
 				local column = setmetatable(items, library):column() 
 				local section = column:section({name = "Playerlist"})
 				local playerlist = section:playerlist({})
-				section:dropdown({name = "Priority", items = {"Enemy", "Priority", "Neutral", "Friendly"}, default = "Neutral", flag = "PLAYERLIST_DROPDOWN", callback = function(text)
+				-- only two classifications now (Friendly / Enemy); stored on library so the
+				-- row-click handler can hide it when the LocalPlayer row is selected
+				library.playerlist_dropdown = section:dropdown({name = "Priority", items = {"Friendly", "Enemy"}, default = "Enemy", flag = "PLAYERLIST_DROPDOWN", callback = function(text)
 					library.prioritize(text)
 				end})
 			--
@@ -7533,12 +7536,20 @@
 
 			local selected_button; 
 
+			-- only Friendly / Enemy are selectable now; Neutral stays as the internal
+			-- default (unclassified) colour so freshly-joined players read as plain text
 			local patterns = {
-				["Priority"] = rgb(255, 255, 0),
 				["Enemy"] = rgb(255, 0, 0),
 				["Neutral"] = themes.preset.text,
 				["Friendly"] = rgb(0, 255, 255)
 			}
+
+			-- Persistent classifications: playerlist_data holds the LIVE row state but is not a
+			-- flag, so it never made it into a saved config. This name->priority map IS kept in
+			-- `flags` (same table reference), so get_config serialises it and load_config restores
+			-- it via the config_flags setter registered below. LocalPlayer is never stored.
+			if type(flags["playerlist_saved"]) ~= "table" then flags["playerlist_saved"] = {} end
+			library.playerlist_saved = flags["playerlist_saved"]
 
 			-- elements 
 				local playerlist_holder = library:create("TextLabel", {
@@ -7795,8 +7806,23 @@
 
 				path.instance = TextButton
 				path.line = line
-				path.priority = tostring(player) ~= lp.Name and "Neutral" or "LocalPlayer"
 				path.priority_text = priority_text
+				if tostring(player) == lp.Name then
+					path.priority = "LocalPlayer"
+				else
+					-- restore a saved Friendly/Enemy from the config, if any; otherwise everyone
+					-- defaults to Enemy (unclassified = hostile)
+					local saved = library.playerlist_saved and library.playerlist_saved[tostring(player)]
+					if saved and patterns[saved] then
+						path.priority = saved
+						priority_text.Text = saved
+						priority_text.TextColor3 = patterns[saved]
+					else
+						path.priority = "Enemy"
+						priority_text.Text = "Enemy"
+						priority_text.TextColor3 = patterns["Enemy"]
+					end
+				end
 				-- library.selected_player = players[tostring(player)]
 				
 				TextButton.MouseButton1Click:Connect(function()
@@ -7812,10 +7838,17 @@
 
 					library.selected_player = player_name.Text
 					library.selected_is_local = is_self
-					-- clicking yourself just shows you as the local player: don't sync the
-					-- Priority dropdown to a non-item value and don't let it reclassify you
-					if not is_self then
-						library.config_flags["PLAYERLIST_DROPDOWN"](path.priority_text.Text)
+					-- clicking yourself just shows you as the local player: hide the Priority
+					-- dropdown entirely (you can't classify yourself), and only sync it to a
+					-- real item (Neutral/unclassified isn't in the dropdown anymore)
+					if is_self then
+						if library.playerlist_dropdown then library.playerlist_dropdown.set_element_visible(false) end
+					else
+						if library.playerlist_dropdown then library.playerlist_dropdown.set_element_visible(true) end
+						local pr = path.priority_text.Text
+						if pr == "Friendly" or pr == "Enemy" then
+							library.config_flags["PLAYERLIST_DROPDOWN"](pr)
+						end
 					end
 
 					if cfg.labels.player then
@@ -7870,15 +7903,47 @@
 				path.priority_text.Text = text
 				path.priority_text.TextColor3 = patterns[text]
 				path.priority = text
+				-- persist it (same table as flags["playerlist_saved"] => saved by get_config)
+				if library.selected_player ~= lp.Name then
+					library.playerlist_saved[library.selected_player] = text
+				end
 			end
 
-			function library.get_priority(player) 
+			function library.get_priority(player)
 				local path = library.playerlist_data[tostring(player)]
 
-				if path then 
+				if path then
 					return path.priority
-				end 
-			end 
+				end
+			end
+
+			-- re-apply the saved map onto every existing row (called after a config loads, since
+			-- the rows were built before the map was restored). Keyed by name; numeric-index
+			-- duplicates and LocalPlayer are skipped.
+			function library.apply_saved_playerlist()
+				for name, path in pairs(library.playerlist_data) do
+					if type(name) == "string" and type(path) == "table" and path.priority_text and name ~= lp.Name then
+						local saved = library.playerlist_saved[name]
+						if saved and patterns[saved] then
+							path.priority = saved
+							path.priority_text.Text = saved
+							path.priority_text.TextColor3 = patterns[saved]
+						end
+					end
+				end
+			end
+
+			-- config load hook: the .cfg holds a plain name->priority table under this key.
+			-- Copy it INTO the live map (keeping the same table reference flags points at) and
+			-- re-apply to visible rows. Registered so load_config actually consumes the key.
+			library.config_flags["playerlist_saved"] = function(v)
+				if type(v) ~= "table" then return end
+				table.clear(library.playerlist_saved)
+				for k, val in pairs(v) do
+					if type(k) == "string" and type(val) == "string" then library.playerlist_saved[k] = val end
+				end
+				library.apply_saved_playerlist()
+			end
 
 			players.PlayerAdded:Connect(cfg.create_player)
 			players.PlayerRemoving:Connect(cfg.remove_player)
