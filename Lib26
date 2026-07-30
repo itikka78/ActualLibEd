@@ -684,7 +684,36 @@
 					end
 				end 
 			end 
+			-- re-apply the saved main font (restoring the list selection alone doesn't re-font
+			-- the menu). A missing/unresolvable font falls back to Default inside apply_saved_font.
+			if type(library.apply_saved_font) == "function" then
+				pcall(function() library:apply_saved_font() end)
+			end
 		end 
+		
+		-- Autoload: a small marker file (autoload.txt in the menu directory) holds the name
+		-- of the config to load automatically when the script runs. Set/cleared by the two
+		-- buttons in the Configs tab; consumed once at load by delta calling library:autoload().
+		function library:autoload_name()
+			local marker = library.directory .. "/autoload.txt"
+			if not (isfile and isfile(marker)) then return nil end
+			local ok, name = pcall(readfile, marker)
+			if not ok or type(name) ~= "string" then return nil end
+			name = name:gsub("^%s+", ""):gsub("%s+$", "")
+			if name == "" then return nil end
+			return name
+		end
+		
+		function library:autoload()
+			local name = library:autoload_name()
+			if not name then return nil end
+			local cfg_path = library.directory .. "/configs/" .. name .. ".cfg"
+			if not (isfile and isfile(cfg_path)) then return nil end
+			local ok, data = pcall(readfile, cfg_path)
+			if not (ok and data) then return nil end
+			pcall(function() library:load_config(data) end)
+			return name
+		end
 		
 		function library:round(number, float) 
 			local multiplier = 1 / (float or 1)
@@ -2123,6 +2152,27 @@
 					configSec:button({name = "Refresh Configs", callback = function()
 						library:config_list_update()
 					end})
+					local function autoloadStatusText()
+						local n = library:autoload_name()
+						return n and ("Autoloading: " .. n .. "   :3") or "Autoload: off"
+					end
+					configSec:button_holder({})
+					local autoStatus = configSec:label({name = autoloadStatusText()})
+					configSec:button_holder({})
+					configSec:button({name = "Set Autoload", callback = function()
+						local name = flags["config_name_list"]
+						if not name or name == "" then library:notification({text = "Select a config first", time = 3}); return end
+						pcall(function() writefile(library.directory .. "/autoload.txt", name) end)
+						autoStatus.set(autoloadStatusText())
+						library:notification({text = "Autoload set: " .. name, time = 3})
+					end})
+					configSec:button({name = "Disable Autoload", callback = function()
+						pcall(function()
+							if isfile(library.directory .. "/autoload.txt") then delfile(library.directory .. "/autoload.txt") end
+						end)
+						autoStatus.set(autoloadStatusText())
+						library:notification({text = "Autoload disabled", time = 3})
+					end})
 					configSec:button_holder({})
 					configSec:button({name = "Unload Config", callback = function()
 						library:load_config(library.old_config)
@@ -2224,6 +2274,42 @@
 					-- Bold toggle: re-weights the currently applied family to Bold (or back)
 					fontSec:toggle({name = "Bold", flag = "lib_font_bold", default = false,
 						callback = function(v) fontBold = v == true; applyLibFont(lastBaseFont) end})
+
+						-- Auto-apply the saved font on config load. Resolves flags["lib_font_list"] the
+						-- SAME way Apply Font does (preset family or custom .ttf) and honours the saved
+						-- Bold state. Anything missing/unresolvable (deleted preset, .ttf not on disk,
+						-- getcustomasset failure) silently falls back to the Default font instead of
+						-- erroring. Called from library:load_config.
+						function library:apply_saved_font()
+							fontBold = flags["lib_font_bold"] == true   -- sync Bold from the loaded config
+							local sel = flags["lib_font_list"]
+							if not sel or sel == "" then applyLibFont(defaultFont); return end
+							if PRESET_FONTS[sel] then
+								local ok, f = pcall(function()
+									return type(PRESET_FONTS[sel]) == "function" and PRESET_FONTS[sel]() or PRESET_FONTS[sel]
+								end)
+								applyLibFont((ok and f) or defaultFont)   -- bad preset -> default
+								return
+							end
+							local filename = sel:match("[^\\/]+$") or sel
+							local path = fontPathMap[filename]
+							if not path then applyLibFont(defaultFont); return end   -- not found -> default
+							local ok, f = pcall(function()
+								local norm_path = path:gsub("\\", "/")
+								local ttf_asset = getcustomasset(norm_path)
+								assert(ttf_asset and ttf_asset ~= "", "getcustomasset failed")
+								local font_name = filename:gsub("%.[^%.]+$", "")
+								local descriptor = http_service:JSONEncode({
+									name = font_name,
+									faces = {{ name = "Regular", weight = 400, style = "normal", assetId = ttf_asset }}
+								})
+								writefile("_atl_font.ttf", descriptor)
+								local json_asset = getcustomasset("_atl_font.ttf")
+								assert(json_asset and json_asset ~= "", "descriptor getcustomasset failed")
+								return Font.new(json_asset, Enum.FontWeight.Regular)
+							end)
+							applyLibFont((ok and f) or defaultFont)   -- load error -> default
+						end
 					fontSec:button_holder({})
 					fontSec:button({name = "Apply Font", callback = function()
 						local sel = flags["lib_font_list"]
