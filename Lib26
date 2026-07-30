@@ -932,7 +932,12 @@
 					items.sgui = library:create("ScreenGui", {
 						Enabled = true,
 						Parent = gethui(),
-						Name = "" 
+						Name = "",
+						-- full-screen coord space: every draggable panel (main window, Style,
+						-- Config, ESP Preview, Playerlist, Output) is built on THIS gui, so this
+						-- is what lets a window (and Aero Snap) drag up past the topbar. Setting
+						-- it on the shared `sgui` alone (dock/popups) never moved the windows.
+						IgnoreGuiInset = true,
 					})
 					
 					items.main_holder = library:create("Frame", {
