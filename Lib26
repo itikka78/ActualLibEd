@@ -3425,7 +3425,11 @@
 			-- 
 
 			-- section instances 
-				local section_holder = library:create("Frame", {
+				-- ScrollingFrame (not a plain Frame): sections content-size and stack now, so a
+				-- tall lane would overflow the fixed window and float its elements off the UI.
+				-- The whole page scrolls vertically instead — AutomaticCanvasSize grows to the
+				-- tallest lane, and the ScrollingFrame clips + scrolls anything past the window.
+				local section_holder = library:create("ScrollingFrame", {
 					Parent = library.section_holder,
 					BackgroundTransparency = 1,
 					Name = "\0",
@@ -3433,8 +3437,17 @@
 					Size = dim2(1, 0, 1, 0),
 					BorderSizePixel = 0,
 					Visible = false,
+					Active = true,
+					ScrollingDirection = Enum.ScrollingDirection.Y,
+					AutomaticCanvasSize = Enum.AutomaticSize.Y,
+					CanvasSize = dim2(0, 0, 0, 0),
+					ScrollBarThickness = 2,
+					ScrollBarImageColor3 = themes.preset.accent,
+					MidImage = "rbxassetid://103468666327206",
+					TopImage = "rbxassetid://103468666327206",
+					BottomImage = "rbxassetid://103468666327206",
 					BackgroundColor3 = rgb(255, 255, 255)
-				})
+				}) library:apply_theme(section_holder, "accent", "ScrollBarImageColor3")
 			
 				cfg["holder"] = section_holder
 
@@ -3490,15 +3503,20 @@
 			
 			local holder = path or self.holder
 			
+			-- content-sized lane: Size Y is driven by the stacked sections (AutomaticSize.Y),
+			-- so the parent section_holder ScrollingFrame can measure the tallest lane and
+			-- scroll the whole page. A fixed scale-1 height here would pin every lane to the
+			-- window and defeat both the page scroll and the content-sizing.
 			local column = library:create("Frame", {
 				Parent = holder,
 				BackgroundTransparency = 1,
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 1, 0),
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
-			}) library:apply_theme(column, "inline", "BackgroundColor3") 
+			}) library:apply_theme(column, "inline", "BackgroundColor3")
 			
 			-- sections size to their own content (AutomaticSize.Y) and stack from the top,
 			-- so a short lane leaves empty space at the BOTTOM instead of flex-stretching its
@@ -3712,7 +3730,8 @@
 						Size = dim2(1, 0, 0, 0),
 						AutomaticSize = Enum.AutomaticSize.Y,
 						BorderSizePixel = 0,
-						BackgroundColor3 = rgb(255, 255, 255)
+						BackgroundColor3 = rgb(255, 255, 255),
+						BackgroundTransparency = 1
 					}) multi.holder = elements
 					
 					local UIListLayout = library:create("UIListLayout", {
@@ -3880,7 +3899,8 @@
 				Size = dim2(1, 0, 0, 0),
 				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
-				BackgroundColor3 = rgb(255, 255, 255)
+				BackgroundColor3 = rgb(255, 255, 255),
+				BackgroundTransparency = 1
 			})
 			cfg.holder = elements
 
