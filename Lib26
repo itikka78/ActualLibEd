@@ -3500,11 +3500,13 @@
 				BackgroundColor3 = themes.preset.inline
 			}) library:apply_theme(column, "inline", "BackgroundColor3") 
 			
+			-- sections size to their own content (AutomaticSize.Y) and stack from the top,
+			-- so a short lane leaves empty space at the BOTTOM instead of flex-stretching its
+			-- sections to fill the column (which left the gap inside a lone short section).
 			library:create("UIListLayout", {
 				Parent = column,
 				Padding = dim(0, 4),
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				VerticalFlex = Enum.UIFlexAlignment.Fill
+				SortOrder = Enum.SortOrder.LayoutOrder
 			})
 			
 			cfg["holder"] = column
@@ -3542,28 +3544,33 @@
 				Parent = self.holder,
 				Name = "",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 1, 0),
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
 			}) library:apply_theme(section, "inline", "BackgroundColor3")
-			
+			library:create("UIPadding", {Parent = section, PaddingBottom = dim(0, 1)})
+
 			local inline = library:create("Frame", {
 				Parent = section,
 				Name = "",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.outline
-			}) library:apply_theme(inline, "outline", "BackgroundColor3") 
-			
+			}) library:apply_theme(inline, "outline", "BackgroundColor3")
+			library:create("UIPadding", {Parent = inline, PaddingBottom = dim(0, 1)})
+
 			local __background = library:create("Frame", {
 				Parent = inline,
 				Name = "",
 				ClipsDescendants = true,
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				ZIndex = 1,
 				BackgroundColor3 = rgb(255, 255, 255)
@@ -3686,8 +3693,9 @@
 						BottomImage = "rbxassetid://103468666327206",
 						AutomaticCanvasSize = Enum.AutomaticSize.Y,
 						ScrollBarThickness = 2,
-						Size = dim2(1, 0, 1, -20),
-						Visible = false, 
+						Size = dim2(1, 0, 0, 0),
+						AutomaticSize = Enum.AutomaticSize.Y,
+						Visible = false,
 						BackgroundTransparency = 1,
 						Position = dim2(0, 0, 0, 24),
 						BackgroundColor3 = rgb(255, 255, 255),
@@ -3702,6 +3710,7 @@
 						Name = "",
 						BorderColor3 = rgb(0, 0, 0),
 						Size = dim2(1, 0, 0, 0),
+						AutomaticSize = Enum.AutomaticSize.Y,
 						BorderSizePixel = 0,
 						BackgroundColor3 = rgb(255, 255, 255)
 					}) multi.holder = elements
@@ -3717,7 +3726,7 @@
 					local UIPadding = library:create("UIPadding", {
 						Parent = ScrollingFrame,
 						Name = "",
-						PaddingBottom = dim(0, 60)
+						PaddingBottom = dim(0, 10)
 					})
 				--
 				
@@ -3760,27 +3769,32 @@
 				Parent = self.holder,
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 1, 0),
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
-			}) library:apply_theme(section, "inline", "BackgroundColor3") 
+			}) library:apply_theme(section, "inline", "BackgroundColor3")
+			library:create("UIPadding", {Parent = section, PaddingBottom = dim(0, 1)})
 
 			local inline = library:create("Frame", {
 				Parent = section,
 				Name = "\0",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.outline
-			}) library:apply_theme(inline, "outline", "BackgroundColor3") 
+			}) library:apply_theme(inline, "outline", "BackgroundColor3")
+			library:create("UIPadding", {Parent = inline, PaddingBottom = dim(0, 1)})
 
 			local background = library:create("Frame", {
 				Parent = inline,
 				Name = "\0",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = rgb(255, 255, 255)
 			})
@@ -3841,14 +3855,15 @@
 				MidImage = "rbxassetid://103468666327206",
 				TopImage = "rbxassetid://103468666327206",
 				BottomImage = "rbxassetid://103468666327206",
-				Size = dim2(1, 0, 1, -20),
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BackgroundTransparency = 1,
 				Position = dim2(0, 0, 0, 20),
 				BackgroundColor3 = rgb(255, 255, 255),
 				BorderColor3 = rgb(0, 0, 0),
 				BorderSizePixel = 0,
 				CanvasSize = dim2(0, 0, 0, 0)
-			}) library:apply_theme(ScrollingFrame, "accent", "ScrollBarImageColor3") 
+			}) library:apply_theme(ScrollingFrame, "accent", "ScrollBarImageColor3")
 
 			ScrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
 				if library.current_element_open then 
@@ -3863,10 +3878,11 @@
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
 				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = rgb(255, 255, 255)
 			})
-			cfg.holder = elements 
+			cfg.holder = elements
 
 			library:create("UIListLayout", {
 				Parent = elements,
