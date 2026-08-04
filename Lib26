@@ -421,9 +421,12 @@
 					library.active_drag = function(inp)
 						local viewport_x = camera.ViewportSize.X
 						local viewport_y = camera.ViewportSize.Y
+						-- lower width floor is dynamic: a 3-lane page raises library.min_widths[frame]
+						-- so the window can't be dragged narrow enough to clip the extra lane.
+						local min_x = (library.min_widths and library.min_widths[frame]) or og_size.X.Offset
 						frame.Size = dim2(
 							start_size.X.Scale,
-							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), og_size.X.Offset, viewport_x),
+							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), min_x, viewport_x),
 							start_size.Y.Scale,
 							math.clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), og_size.Y.Offset, viewport_y)
 						)
@@ -951,23 +954,33 @@
 					LineJoinMode = Enum.LineJoinMode.Miter
 				})
 
+				-- Hover shows this tooltip and registers it as THE active one; the single
+				-- shared driver below moves whichever tooltip is active. Previously every
+				-- tool_tip() created its own uis.InputChanged connection, so N tooltips = N
+				-- listeners all firing on every mouse move — this collapses that to one.
 				cfg.path.MouseEnter:Connect(function()
-					watermark_outline.Visible = true 
-				end)   
+					watermark_outline.Visible = true
+					library._tt_active = watermark_outline
+				end)
 
 				cfg.path.MouseLeave:Connect(function()
-					watermark_outline.Visible = false 
+					watermark_outline.Visible = false
+					if library._tt_active == watermark_outline then library._tt_active = nil end
 				end)
 
-				library:connection(uis.InputChanged, function(input)
-					if watermark_outline.Visible and input.UserInputType == Enum.UserInputType.MouseMovement then
-						watermark_outline.Position = dim_offset(input.Position.X + 10, input.Position.Y + 10)
-					end
-				end)
-			end 
-			
+				if not library._tt_driver then
+					library._tt_driver = true
+					library:connection(uis.InputChanged, function(input)
+						local tt = library._tt_active
+						if tt and tt.Visible and input.UserInputType == Enum.UserInputType.MouseMovement then
+							tt.Position = dim_offset(input.Position.X + 10, input.Position.Y + 10)
+						end
+					end)
+				end
+			end
+
 			return cfg
-		end 
+		end
 
 		function library:panel(options) 
 			local cfg = {
@@ -1980,9 +1993,13 @@
 					}
 				})
 				
-				library:apply_theme(UIGradient, "contrast", "Color") 
-				library:make_resizable(items.main_holder) 
-			-- 
+				library:apply_theme(UIGradient, "contrast", "Color")
+				library:make_resizable(items.main_holder)
+				-- referenced by library:column so a 3-lane page can raise this window's
+				-- resize floor and grow it to fit (see library:column lane handling).
+				library._main_holder = items.main_holder
+				library.min_widths = library.min_widths or {}
+			--
 
 			-- theming 
 				local style = library:panel({
@@ -3453,53 +3470,6 @@
 
 				library.current_tab[2].Visible = true
 
-				-- Quint fade-in of the opened tab's content (ExampleLib FadeDescendants port):
-				-- every descendant's transparency props snap to 1 then tween back to their real
-				-- value, so the page eases in instead of popping.
-				--
-				-- The fade LIST — {object, transparency prop, resting value} for each descendant —
-				-- is computed ONCE per tab and cached on cfg._fade_list. The old code re-walked
-				-- GetDescendants and did a GetAttribute/SetAttribute (+ pcall'd read) per prop on
-				-- EVERY switch; that per-switch walk over a heavy tab was the tab-change hitch.
-				-- A tab's element set is fixed after build, so the list never needs rebuilding.
-				do
-					local info = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-					local list = cfg._fade_list
-					if not list then
-						list = {}
-						local function fade_props(o)
-							if o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox") then
-								return {"TextTransparency", "BackgroundTransparency"}
-							elseif o:IsA("ImageLabel") or o:IsA("ImageButton") then
-								return {"ImageTransparency", "BackgroundTransparency"}
-							elseif o:IsA("ScrollingFrame") or o:IsA("Frame") then
-								return {"BackgroundTransparency"}
-							elseif o:IsA("UIStroke") then
-								return {"Transparency"}
-							end
-						end
-						local objs = section_holder:GetDescendants()
-						objs[#objs + 1] = section_holder
-						for _, o in next, objs do
-							local p = fade_props(o)
-							if p then
-								for _, prop in next, p do
-									local ok, cur = pcall(function() return o[prop] end)
-									if ok and type(cur) == "number" and cur < 1 then
-										list[#list + 1] = {o = o, prop = prop, rest = cur}
-									end
-								end
-							end
-						end
-						cfg._fade_list = list
-					end
-					for i = 1, #list do
-						local e = list[i]
-						e.o[e.prop] = 1
-						tween_service:Create(e.o, info, {[e.prop] = e.rest}):Play()
-					end
-				end
-
 				if library.current_element_open and library.current_element_open ~= cfg then
 					library.current_element_open.set_visible(false)
 					library.current_element_open.open = false 
@@ -3539,7 +3509,27 @@
 			
 			cfg["holder"] = column
 
-			return setmetatable(cfg, library) 
+			-- Lane-aware minimum width. Columns are the page's vertical "lanes"; the tab's
+			-- section_holder splits them evenly (HorizontalFlex = Fill). Two lanes fit the
+			-- stock 604px window, but a page built with 3+ lanes needs a wider window or the
+			-- extra lane squeezes elements into clipping. We count lanes per tab (self is the
+			-- tab), and once a tab passes 2 lanes we raise the main window's resize floor and,
+			-- if it's currently narrower, grow it to fit. Each lane past 2 adds 122px, matching
+			-- the comfortable ~726px 3-lane spacing. Panels/tabs with 1-2 lanes are untouched.
+			self._lane_count = (self._lane_count or 0) + 1
+			if self._lane_count >= 3 and library._main_holder then
+				local mh = library._main_holder
+				local want = 604 + (self._lane_count - 2) * 122
+				library.min_widths = library.min_widths or {}
+				if (library.min_widths[mh] or 0) < want then
+					library.min_widths[mh] = want
+				end
+				if mh.Size.X.Offset < want then
+					mh.Size = dim2(mh.Size.X.Scale, want, mh.Size.Y.Scale, mh.Size.Y.Offset)
+				end
+			end
+
+			return setmetatable(cfg, library)
 		end
 
 		function library:multi_section(options)
@@ -5194,12 +5184,14 @@
 			local parent = self.right_holder
 			
 			local cfg = {
-				name = options.name or "Color", 
+				name = options.name or "Color",
 				flag = options.flag or tostring(2^789),
 				color = options.color or color(1, 1, 1), -- Default to white color if not provided
 				alpha = options.alpha or 1,
 				callback = options.callback or function() end,
 				right_holder = self.right_holder,
+				tooltip = options.tooltip or nil,
+				use_accent = options.use_accent or false,   -- adds a "Use Accent" toggle to the popup
 			}
 
 			local dragging_sat = false 
@@ -5263,7 +5255,8 @@
 				})
 
 				library:hoverify(colorpicker_button, colorpicker_button)
-			
+				if cfg.tooltip then library:tool_tip({name = cfg.tooltip, path = colorpicker_button}) end
+
 				local UIGradient = library:create("UIGradient", {
 					Parent = handler,
 					Rotation = 90,
@@ -5275,12 +5268,15 @@
 			-- 
 
 			-- colorpicker instances
+				-- Use Accent adds one extra toggle row at the bottom, so the popup grows 18px
+				-- and main_holder reserves 18px more below (see its Size). Plain pickers are 210.
+				local popup_h = cfg.use_accent and 228 or 210
 				local colorpicker_holder = library:create("Frame", {
 					Parent = sgui,
 					Name = "colorpicker",
 					Position = dim2(0, colorpicker_button.AbsolutePosition.X + 1, 0, colorpicker_button.AbsolutePosition.Y + 17),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(0, 190, 0, 210),
+					Size = dim2(0, 190, 0, popup_h),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline,
 					Visible = false,
@@ -5352,10 +5348,10 @@
 					Name = "main_holder",
 					Position = dim2(0, 0, 0, 20),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(1, 0, 1, -40),
+					Size = dim2(1, 0, 1, cfg.use_accent and -58 or -40),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.inline
-				}) library:apply_theme(main_holder, "inline", "BackgroundColor3") 
+				}) library:apply_theme(main_holder, "inline", "BackgroundColor3")
 				
 				cfg.holder = library:create( "Frame" , {
 					Parent = colorpicker_holder;
@@ -5367,6 +5363,33 @@
 				});
 				
 				local RainbowToggle = setmetatable(cfg, library):toggle({name = "Rainbow", flag = cfg.flag .. "_RAINBOW_FLAG"})
+
+				-- Use Accent (opt-in): its own row above Rainbow. While on, the picker locks to
+				-- the theme accent and follows accent/theme changes — registered into the shared
+				-- per-frame driver (created by the Rainbow block below) with a changed-check so
+				-- it only re-sets when the accent actually moves. Off leaves the last colour.
+				if cfg.use_accent then
+					cfg.holder = library:create("Frame", {
+						Parent = colorpicker_holder;
+						Name = "\0";
+						Position = dim2(0, 6, 1, -37);
+						BorderColor3 = rgb(0, 0, 0);
+						Size = dim2(1, -120, 0, 0);
+						BorderSizePixel = 0;
+					})
+					local accent_flag = cfg.flag .. "_ACCENT_FLAG"
+					setmetatable(cfg, library):toggle({name = "Use Accent", flag = accent_flag})
+					library._rainbow_pickers = library._rainbow_pickers or {}
+					local last_ac
+					insert(library._rainbow_pickers, function()
+						if flags[accent_flag] then
+							local ac = themes.preset.accent
+							if ac ~= last_ac then last_ac = ac; cfg.set(ac, a) end
+						else
+							last_ac = nil
+						end
+					end)
+				end
 
 				cfg.holder = library:create( "Frame" , {
 					Parent = colorpicker_holder;
@@ -5380,13 +5403,30 @@
 				
 				local section = setmetatable(cfg, library)
 				section:button_holder({})
+				-- Copy/Paste move the COLOUR only — they must not touch this picker's Rainbow
+				-- toggle (the old code set library.is_rainbow to a truthy flag-name on Copy and
+				-- had Paste force Rainbow on, which is why copying "turned rainbow on"). We snapshot
+				-- the value (not the live flag table, so a later source change can't mutate it) and
+				-- also mirror it to the system clipboard as a #hex, so a colour can be pasted into
+				-- another picker or pulled from an external hex.
 				section:button({name = "Copy", callback = function()
-					library.copied_flag = flags[cfg.flag]
-					library.is_rainbow = cfg.flag .. "_RAINBOW_FLAG"
+					local c = flags[cfg.flag]
+					if c then
+						library.copied_flag = {Color = c.Color, Transparency = c.Transparency}
+						if setclipboard then pcall(setclipboard, "#" .. c.Color:ToHex()) end
+					end
 				end})
 				section:button({name = "Paste", callback = function()
-					RainbowToggle.set(library.is_rainbow)
-					cfg.set(library.copied_flag.Color, library.copied_flag.Transparency)
+					local c = library.copied_flag
+					-- fall back to a #hex on the clipboard if nothing was copied in-menu yet
+					if not c and getclipboard then
+						local ok, txt = pcall(getclipboard)
+						if ok and type(txt) == "string" then
+							local hx = txt:match("#?(%x%x%x%x%x%x)")
+							if hx then local okc, col = pcall(hex, "#" .. hx); if okc then c = {Color = col, Transparency = 0} end end
+						end
+					end
+					if c then cfg.set(c.Color, c.Transparency) end
 				end})
 
 				local main_holder_inline = library:create("Frame", {
@@ -6323,6 +6363,7 @@
 				-- auto-scroll long lists (huge item catalogs would overflow the screen)
 				scrolling = options.scrolling or (options.items and #options.items > 14) or false,
 				ignore = options.ignore or nil,
+					tooltip = options.tooltip or nil,
 			}
 
 			cfg.default = options.default or (cfg.multi and {cfg.items[1]}) or cfg.items[1] or nil
@@ -6351,6 +6392,7 @@
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
 
+				if cfg.tooltip then library:tool_tip({name = cfg.tooltip, path = dropdown_REAL}) end
 				local main_text      
 				if cfg.name then 
 					local left_components = library:create("Frame", {
@@ -7406,6 +7448,7 @@
 			local cfg = {
 				callback = options.callback or function() end, 
 				name = options.text or options.name or "Button",
+					tooltip = options.tooltip or nil,
 			}   
 
 			local button = library:create("TextButton", {
@@ -7420,6 +7463,7 @@
 			})
 
 			library:hoverify(button, button)
+				if cfg.tooltip then library:tool_tip({name = cfg.tooltip, path = button}) end
 			
 			library:apply_theme(button, "outline", "BackgroundColor3") 
 			
