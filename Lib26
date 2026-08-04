@@ -421,9 +421,12 @@
 					library.active_drag = function(inp)
 						local viewport_x = camera.ViewportSize.X
 						local viewport_y = camera.ViewportSize.Y
+						-- lower width floor is dynamic: a 3-lane page raises library.min_widths[frame]
+						-- so the window can't be dragged narrow enough to clip the extra lane.
+						local min_x = (library.min_widths and library.min_widths[frame]) or og_size.X.Offset
 						frame.Size = dim2(
 							start_size.X.Scale,
-							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), og_size.X.Offset, viewport_x),
+							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), min_x, viewport_x),
 							start_size.Y.Scale,
 							math.clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), og_size.Y.Offset, viewport_y)
 						)
@@ -1990,9 +1993,13 @@
 					}
 				})
 				
-				library:apply_theme(UIGradient, "contrast", "Color") 
-				library:make_resizable(items.main_holder) 
-			-- 
+				library:apply_theme(UIGradient, "contrast", "Color")
+				library:make_resizable(items.main_holder)
+				-- referenced by library:column so a 3-lane page can raise this window's
+				-- resize floor and grow it to fit (see library:column lane handling).
+				library._main_holder = items.main_holder
+				library.min_widths = library.min_widths or {}
+			--
 
 			-- theming 
 				local style = library:panel({
@@ -3493,16 +3500,38 @@
 				BackgroundColor3 = themes.preset.inline
 			}) library:apply_theme(column, "inline", "BackgroundColor3") 
 			
+			-- sections size to their own content (AutomaticSize.Y) and stack from the top,
+			-- so a short lane leaves empty space at the BOTTOM instead of flex-stretching its
+			-- sections to fill the column (which left the gap inside a lone short section).
 			library:create("UIListLayout", {
 				Parent = column,
 				Padding = dim(0, 4),
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				VerticalFlex = Enum.UIFlexAlignment.Fill
+				SortOrder = Enum.SortOrder.LayoutOrder
 			})
 			
 			cfg["holder"] = column
 
-			return setmetatable(cfg, library) 
+			-- Lane-aware minimum width. Columns are the page's vertical "lanes"; the tab's
+			-- section_holder splits them evenly (HorizontalFlex = Fill). Two lanes fit the
+			-- stock 604px window, but a page built with 3+ lanes needs a wider window or the
+			-- extra lane squeezes elements into clipping. We count lanes per tab (self is the
+			-- tab), and once a tab passes 2 lanes we raise the main window's resize floor and,
+			-- if it's currently narrower, grow it to fit. Each lane past 2 adds 122px, matching
+			-- the comfortable ~726px 3-lane spacing. Panels/tabs with 1-2 lanes are untouched.
+			self._lane_count = (self._lane_count or 0) + 1
+			if self._lane_count >= 3 and library._main_holder then
+				local mh = library._main_holder
+				local want = 604 + (self._lane_count - 2) * 122
+				library.min_widths = library.min_widths or {}
+				if (library.min_widths[mh] or 0) < want then
+					library.min_widths[mh] = want
+				end
+				if mh.Size.X.Offset < want then
+					mh.Size = dim2(mh.Size.X.Scale, want, mh.Size.Y.Scale, mh.Size.Y.Offset)
+				end
+			end
+
+			return setmetatable(cfg, library)
 		end
 
 		function library:multi_section(options)
@@ -3515,28 +3544,33 @@
 				Parent = self.holder,
 				Name = "",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 1, 0),
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
 			}) library:apply_theme(section, "inline", "BackgroundColor3")
-			
+			library:create("UIPadding", {Parent = section, PaddingBottom = dim(0, 1)})
+
 			local inline = library:create("Frame", {
 				Parent = section,
 				Name = "",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.outline
-			}) library:apply_theme(inline, "outline", "BackgroundColor3") 
-			
+			}) library:apply_theme(inline, "outline", "BackgroundColor3")
+			library:create("UIPadding", {Parent = inline, PaddingBottom = dim(0, 1)})
+
 			local __background = library:create("Frame", {
 				Parent = inline,
 				Name = "",
 				ClipsDescendants = true,
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				ZIndex = 1,
 				BackgroundColor3 = rgb(255, 255, 255)
@@ -3659,8 +3693,9 @@
 						BottomImage = "rbxassetid://103468666327206",
 						AutomaticCanvasSize = Enum.AutomaticSize.Y,
 						ScrollBarThickness = 2,
-						Size = dim2(1, 0, 1, -20),
-						Visible = false, 
+						Size = dim2(1, 0, 0, 0),
+						AutomaticSize = Enum.AutomaticSize.Y,
+						Visible = false,
 						BackgroundTransparency = 1,
 						Position = dim2(0, 0, 0, 24),
 						BackgroundColor3 = rgb(255, 255, 255),
@@ -3675,6 +3710,7 @@
 						Name = "",
 						BorderColor3 = rgb(0, 0, 0),
 						Size = dim2(1, 0, 0, 0),
+						AutomaticSize = Enum.AutomaticSize.Y,
 						BorderSizePixel = 0,
 						BackgroundColor3 = rgb(255, 255, 255)
 					}) multi.holder = elements
@@ -3690,7 +3726,7 @@
 					local UIPadding = library:create("UIPadding", {
 						Parent = ScrollingFrame,
 						Name = "",
-						PaddingBottom = dim(0, 60)
+						PaddingBottom = dim(0, 10)
 					})
 				--
 				
@@ -3733,27 +3769,32 @@
 				Parent = self.holder,
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 1, 0),
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
-			}) library:apply_theme(section, "inline", "BackgroundColor3") 
+			}) library:apply_theme(section, "inline", "BackgroundColor3")
+			library:create("UIPadding", {Parent = section, PaddingBottom = dim(0, 1)})
 
 			local inline = library:create("Frame", {
 				Parent = section,
 				Name = "\0",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.outline
-			}) library:apply_theme(inline, "outline", "BackgroundColor3") 
+			}) library:apply_theme(inline, "outline", "BackgroundColor3")
+			library:create("UIPadding", {Parent = inline, PaddingBottom = dim(0, 1)})
 
 			local background = library:create("Frame", {
 				Parent = inline,
 				Name = "\0",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 1, -2),
+				Size = dim2(1, -2, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = rgb(255, 255, 255)
 			})
@@ -3814,14 +3855,15 @@
 				MidImage = "rbxassetid://103468666327206",
 				TopImage = "rbxassetid://103468666327206",
 				BottomImage = "rbxassetid://103468666327206",
-				Size = dim2(1, 0, 1, -20),
+				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BackgroundTransparency = 1,
 				Position = dim2(0, 0, 0, 20),
 				BackgroundColor3 = rgb(255, 255, 255),
 				BorderColor3 = rgb(0, 0, 0),
 				BorderSizePixel = 0,
 				CanvasSize = dim2(0, 0, 0, 0)
-			}) library:apply_theme(ScrollingFrame, "accent", "ScrollBarImageColor3") 
+			}) library:apply_theme(ScrollingFrame, "accent", "ScrollBarImageColor3")
 
 			ScrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
 				if library.current_element_open then 
@@ -3836,10 +3878,11 @@
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
 				Size = dim2(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
 				BackgroundColor3 = rgb(255, 255, 255)
 			})
-			cfg.holder = elements 
+			cfg.holder = elements
 
 			library:create("UIListLayout", {
 				Parent = elements,
