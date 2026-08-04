@@ -421,12 +421,9 @@
 					library.active_drag = function(inp)
 						local viewport_x = camera.ViewportSize.X
 						local viewport_y = camera.ViewportSize.Y
-						-- lower width floor is dynamic: a 3-lane page raises library.min_widths[frame]
-						-- so the window can't be dragged narrow enough to clip the extra lane.
-						local min_x = (library.min_widths and library.min_widths[frame]) or og_size.X.Offset
 						frame.Size = dim2(
 							start_size.X.Scale,
-							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), min_x, viewport_x),
+							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), og_size.X.Offset, viewport_x),
 							start_size.Y.Scale,
 							math.clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), og_size.Y.Offset, viewport_y)
 						)
@@ -1993,13 +1990,9 @@
 					}
 				})
 				
-				library:apply_theme(UIGradient, "contrast", "Color")
-				library:make_resizable(items.main_holder)
-				-- referenced by library:column so a 3-lane page can raise this window's
-				-- resize floor and grow it to fit (see library:column lane handling).
-				library._main_holder = items.main_holder
-				library.min_widths = library.min_widths or {}
-			--
+				library:apply_theme(UIGradient, "contrast", "Color") 
+				library:make_resizable(items.main_holder) 
+			-- 
 
 			-- theming 
 				local style = library:panel({
@@ -3509,27 +3502,7 @@
 			
 			cfg["holder"] = column
 
-			-- Lane-aware minimum width. Columns are the page's vertical "lanes"; the tab's
-			-- section_holder splits them evenly (HorizontalFlex = Fill). Two lanes fit the
-			-- stock 604px window, but a page built with 3+ lanes needs a wider window or the
-			-- extra lane squeezes elements into clipping. We count lanes per tab (self is the
-			-- tab), and once a tab passes 2 lanes we raise the main window's resize floor and,
-			-- if it's currently narrower, grow it to fit. Each lane past 2 adds 122px, matching
-			-- the comfortable ~726px 3-lane spacing. Panels/tabs with 1-2 lanes are untouched.
-			self._lane_count = (self._lane_count or 0) + 1
-			if self._lane_count >= 3 and library._main_holder then
-				local mh = library._main_holder
-				local want = 604 + (self._lane_count - 2) * 122
-				library.min_widths = library.min_widths or {}
-				if (library.min_widths[mh] or 0) < want then
-					library.min_widths[mh] = want
-				end
-				if mh.Size.X.Offset < want then
-					mh.Size = dim2(mh.Size.X.Scale, want, mh.Size.Y.Scale, mh.Size.Y.Offset)
-				end
-			end
-
-			return setmetatable(cfg, library)
+			return setmetatable(cfg, library) 
 		end
 
 		function library:multi_section(options)
