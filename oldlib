@@ -3507,10 +3507,12 @@
 			function cfg.refresh_elements( )                                
 				objects.holder.Parent = flags["Enabled"] and items.viewportframe or library.cache
 
+				-- Healthbar + Ammo are builder-owned globals now (gated by cfg._show below),
+				-- so they're NOT in this flag-driven temp loop — otherwise the real ESP flags
+				-- would auto-show them on the preview regardless of the tray.
 				local temp = {
 					["Names"] = objects["name"];
 					["Name_Color"] = {objects["name"]};
-					["Healthbar"] = objects[ "healthbar_holder" ];
 					["Distance"] = objects[ "distance" ];
 					["Weapon"] = objects[ "weapon" ];
 					["Distance_Color"] = {objects[ "distance" ]};
@@ -3562,6 +3564,14 @@
 					corner.Frame.BackgroundColor3 = flags["Box_Color"].Color
 				end
 
+				-- Healthbar: builder-owned via cfg._show.healthbar (a global chip); fall back
+				-- to the real Healthbar flag only when the builder never wired up.
+				do
+					local hp_on
+					if cfg._show then hp_on = cfg._show.healthbar == true else hp_on = flags["Healthbar"] == true end
+					objects["healthbar_holder"].Parent = hp_on and objects["holder"] or library.cache
+				end
+
 				-- Edition tag (gated by ESP_Edition; colour from the Elite picker)
 				if objects["edition"] then
 					-- builder owns placement/visibility; refresh only recolours it
@@ -3593,9 +3603,12 @@
 					end
 				end
 
-				-- Ammo bar (gated by Ammobar; colours from its pickers)
+				-- Ammo bar: builder-owned via cfg._show.ammo (a global chip); fall back to the
+				-- real Ammobar flag only when the builder never wired up.
 				if objects["ammo_bg"] then
-					objects["ammo_bg"].Parent = flags["Ammobar"] and objects["holder"] or library.cache
+					local ammo_on
+					if cfg._show then ammo_on = cfg._show.ammo == true else ammo_on = flags["Ammobar"] == true end
+					objects["ammo_bg"].Parent = ammo_on and objects["holder"] or library.cache
 					local bg = flags["Ammo_BG_Color"]
 					if bg and bg.Color then objects["ammo_bg"].BackgroundColor3 = bg.Color end
 					local c1, c2 = flags["Ammo_Color_Top"], flags["Ammo_Color_Bottom"]
@@ -3647,7 +3660,9 @@
 			-- insertion pick use Roblox's native hover (drop-zones / chip MouseEnter), so there
 			-- is no inset/absolute-position math. Layout persists in the esp_layout flag. The
 			-- whole thing is pcall-wrapped: a builder hiccup can never abort the menu load.
-			pcall(function()
+			-- The error is captured + logged (Output console + warn) so a silent failure —
+			-- which would leave the tabs/tray/chips unbuilt — is diagnosable, not invisible.
+			local _esp_ok, _esp_err = pcall(function()
 				local objects  = cfg.objects
 				local holder   = objects.holder
 				local ACCENT   = (themes and themes.preset and themes.preset.accent) or rgb(225, 55, 110)
@@ -3672,10 +3687,12 @@
 					{key = "stats",     label = "Stats"},
 					-- global toggle chips: whole-preview visuals, NOT side-anchored. Drag out
 					-- of the tray to turn ON, drag back to the tray to turn OFF.
-					{key = "box",       label = "Box",      global = true},
-					{key = "skeleton",  label = "Skeleton", global = true},
-					{key = "chams",     label = "Chams",    global = true},
-					{key = "head_dot",  label = "Head Dot", global = true},
+					{key = "box",       label = "Box",       global = true},
+					{key = "skeleton",  label = "Skeleton",  global = true},
+					{key = "chams",     label = "Chams",     global = true},
+					{key = "head_dot",  label = "Head Dot",  global = true},
+					{key = "healthbar", label = "Healthbar", global = true},
+					{key = "ammo",      label = "Ammo Bar",  global = true},
 				}
 				-- nothing placed by default: every chip (text tags AND the box/skeleton/chams/
 				-- head_dot globals) starts in the tray, so the box is empty until you drag/click
@@ -3688,7 +3705,7 @@
 				for _, c in ipairs(CHIPS) do if c.global then GLOBAL_KEYS[c.key] = true end end
 				-- global chip -> the real ESP flag it mirrors, so a fresh builder (no saved
 				-- layout) starts each global ON if its ESP toggle is already on.
-				local GLOBAL_FLAG = { box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot" }
+				local GLOBAL_FLAG = { box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot", healthbar = "Healthbar", ammo = "Ammobar" }
 				cfg._show = {}
 				for k in pairs(GLOBAL_KEYS) do cfg._show[k] = false end
 
@@ -3839,7 +3856,9 @@
 					if GLOBAL_KEYS[key] then
 						placed[key] = "on"; cfg._show[key] = true
 						refresh_palette(); save_layout()
-						if key == "box" and cfg.refresh_elements then pcall(cfg.refresh_elements) end
+						-- box/healthbar/ammo are shown via refresh_elements (parenting), not the
+						-- per-frame overlay, so re-run it on any global toggle to reflect instantly
+						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 						return
 					end
 					objects[key].Parent = containers[side]
@@ -3863,7 +3882,7 @@
 					if GLOBAL_KEYS[key] then
 						placed[key] = nil; cfg._show[key] = false
 						refresh_palette(); save_layout()
-						if key == "box" and cfg.refresh_elements then pcall(cfg.refresh_elements) end
+						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 						return
 					end
 					local side = placed[key]
@@ -3935,37 +3954,45 @@
 					hover_side = nil; hover_before = nil; hover_palette = false
 				end)
 
-				-- wire each real element as a drag source + build its palette chip
+				-- wire each real element as a drag source + build its palette chip. Each chip
+				-- is pcall-isolated so one bad element can NEVER abort the loop (which would
+				-- leave the tray/tabs unbuilt); a failure is logged with the chip's key.
 				for _, c in ipairs(CHIPS) do
-					local o = objects[c.key]
-					-- side chips wire the real preview element as a drag source too. Global
-					-- chips (box/skeleton/chams/head_dot) have no draggable side element —
-					-- chams is a Highlight, box is many frames — so only the tray chip drives
-					-- them, and the preview reads cfg._show for their on/off state.
-					if o and not GLOBAL_KEYS[c.key] then
-						normalize(o)
-						add_hover(o)
-						bind_drag(o, c.key)
-						-- during a drag, hovering a placed chip = insert before it
-						library:connection(o.MouseEnter, function()
-							if dragging and dragging ~= c.key and placed[c.key] then
-								hover_side = placed[c.key]; hover_before = c.key
-							end
-						end)
-					end
+					local okc, errc = pcall(function()
+						local o = objects[c.key]
+						-- side chips wire the real preview element as a drag source too. Global
+						-- chips (box/skeleton/chams/head_dot/healthbar/ammo) have no draggable
+						-- side element, so only the tray chip drives them and the preview reads
+						-- cfg._show for their on/off state.
+						if o and not GLOBAL_KEYS[c.key] then
+							normalize(o)
+							add_hover(o)
+							bind_drag(o, c.key)
+							-- during a drag, hovering a placed chip = insert before it
+							library:connection(o.MouseEnter, function()
+								if dragging and dragging ~= c.key and placed[c.key] then
+									hover_side = placed[c.key]; hover_before = c.key
+								end
+							end)
+						end
 
-					-- every element gets a tray chip (the drag source)
-					local chip = library:create("TextLabel", {
-						Parent = tray; Name = "\0"; Active = true; FontFace = library.font;
-						Text = c.label; TextColor3 = TXT; BackgroundColor3 = ACCENT;
-						BackgroundTransparency = 1; BorderSizePixel = 0;
-						AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 14); TextSize = 12; ZIndex = 6;
-					})
-					library:create("UICorner", {Parent = chip; CornerRadius = dim(0, 3)})
-					library:create("UIPadding", {Parent = chip; PaddingLeft = dim(0, 4); PaddingRight = dim(0, 4)})
-					palette_chips[c.key] = chip
-					add_hover(chip)
-					bind_drag(chip, c.key)
+						-- every element gets a tray chip (the drag source)
+						local chip = library:create("TextLabel", {
+							Parent = tray; Name = "\0"; Active = true; FontFace = library.font;
+							Text = c.label; TextColor3 = TXT; BackgroundColor3 = ACCENT;
+							BackgroundTransparency = 1; BorderSizePixel = 0;
+							AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 14); TextSize = 12; ZIndex = 6;
+						})
+						library:create("UICorner", {Parent = chip; CornerRadius = dim(0, 3)})
+						library:create("UIPadding", {Parent = chip; PaddingLeft = dim(0, 4); PaddingRight = dim(0, 4)})
+						palette_chips[c.key] = chip
+						add_hover(chip)
+						bind_drag(chip, c.key)
+					end)
+					if not okc then
+						warn("[ESP chip " .. tostring(c.key) .. "] " .. tostring(errc))
+						pcall(function() library:log("ESP chip '" .. tostring(c.key) .. "' failed: " .. tostring(errc), "ERROR") end)
+					end
 				end
 
 				-- initial placement: from the esp_layout flag, else the defaults
@@ -4061,6 +4088,10 @@
 					library.config_flags["esp_layout_ai"] = setter("esp_layout_ai")
 				end
 			end)
+			if not _esp_ok then
+				warn("[ESP builder] failed: " .. tostring(_esp_err))
+				pcall(function() library:log("ESP builder failed: " .. tostring(_esp_err), "ERROR") end)
+			end
 
 			return setmetatable(cfg, library)
 		end
