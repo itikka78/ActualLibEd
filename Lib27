@@ -217,96 +217,9 @@
 		
 	library.__index = library
 
-	for _, path in next, library.folders do
+	for _, path in next, library.folders do 
 		makefolder(library.directory .. path)
-	end
-
-	-- Local image assets (dock icons, glows) live in the /images folder made above,
-	-- next to the configs and fonts. Anything not on disk is fetched once on first run,
-	-- so a fresh install gets real icons instead of blank buttons. The fallback keeps
-	-- the old uploaded rbxassetid in play if the download or getcustomasset fails, and
-	-- a failure is cached as `false` so a dead link isn't retried on every lookup.
-	library.image_url = "https://raw.githubusercontent.com/itikka78/ActualLibEd/refs/heads/main/images/"
-	local image_cache = {}
-	function library:image(name, fallback)
-		local hit = image_cache[name]
-		if hit ~= nil then return hit or fallback end
-		local id
-		-- a real PNG opens with the 0x89 'PNG' magic; a GitHub 404 is a short
-		-- "404: Not Found" TEXT body. Some executors return that body from HttpGet
-		-- instead of erroring, so we validate the BYTES before trusting a file.
-		local PNG_MAGIC = "\137PNG\r\n\26\n"
-		pcall(function()
-			local path = library.directory .. "/images/" .. name
-			local need_download = not isfile(path)
-			if not need_download then
-				-- validate a file already on disk too: a prior session (before this
-				-- check) may have written a 404 body here, which would otherwise load
-				-- as a blank asset. Purge a bad one so it re-downloads (and a truly
-				-- missing image then 404s -> cached as a miss -> caller gets fallback).
-				local ok_read, existing = pcall(readfile, path)
-				if ok_read and type(existing) == "string" and existing:sub(1, 8) ~= PNG_MAGIC then
-					pcall(delfile, path)
-					need_download = true
-				end
-				-- if readfile failed, assume the file is fine (don't nuke a valid icon)
-			end
-			if need_download then
-				local data = game:HttpGet(library.image_url .. name)
-				if type(data) ~= "string" or data:sub(1, 8) ~= PNG_MAGIC then
-					return   -- leave id nil -> cached as a miss
-				end
-				writefile(path, data)
-			end
-			id = getcustomasset(path)
-		end)
-		if id == "" then id = nil end
-		image_cache[name] = id or false
-		return id or fallback
-	end
-
-	-- Icon Style: the dock/panel icons can switch between the shipped "Basic" set and a
-	-- "Custom" set that mirrors each base name with a 2 suffix (main.png -> main2.png).
-	-- Panels register their dock ImageLabel here as they're built (see register_icon in
-	-- :window); apply_icon_style re-resolves each one. A missing custom file just falls
-	-- back to the base rbxassetid, so Custom degrades to looking like Basic until uploaded.
-	library.icon_panels = {}
-	function library:apply_icon_style(style)
-		local custom = style == "Custom"
-		for _, e in ipairs(library.icon_panels) do
-			if e.icon and e.icon.Parent then
-				if custom then
-					-- nil fallback so a missing custom file resolves to nil (not the base
-					-- rbxassetid), letting us detect the miss, use the basic icon instead,
-					-- and report exactly which custom file wasn't found.
-					local img = library:image(e.custom, nil)
-					if img == nil then
-						library:log("Icon Style: '" .. e.custom .. "' not found - using basic icon", "WARN")
-						img = library:image(e.base, e.fallback)
-					end
-					e.icon.Image = img
-				else
-					e.icon.Image = library:image(e.base, e.fallback)
-				end
-			end
-		end
-	end
-
-	-- Debug output. Anything in the script can push a line to the Output panel with
-	-- library:log("text", "WARN"). Levels: INFO / WARN / SUCCESS / ERROR / DEBUG.
-	-- Calls made before that panel exists (library init, or anything before :window()
-	-- runs) are buffered and flushed when it opens, so early startup lines — usually
-	-- the ones you most want to see — aren't silently dropped.
-	library.log_buffer = {}
-	function library:log(text, level)
-		local entry = {text = tostring(text), level = string.upper(tostring(level or "INFO"))}
-		if library.console then
-			library.console.add(entry.text, entry.level)
-		else
-			insert(library.log_buffer, entry)
-		end
-		return entry
-	end
+	end 
 
 	writefile("ffff.ttf", game:HttpGet("https://github.com/weasely111/beta/raw/refs/heads/main/fs-tahoma-8px.ttf"))
 
@@ -421,12 +334,9 @@
 					library.active_drag = function(inp)
 						local viewport_x = camera.ViewportSize.X
 						local viewport_y = camera.ViewportSize.Y
-						-- lower width floor is dynamic: a 3-lane page raises library.min_widths[frame]
-						-- so the window can't be dragged narrow enough to clip the extra lane.
-						local min_x = (library.min_widths and library.min_widths[frame]) or og_size.X.Offset
 						frame.Size = dim2(
 							start_size.X.Scale,
-							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), min_x, viewport_x),
+							math.clamp(start_size.X.Offset + (inp.Position.X - start.X), og_size.X.Offset, viewport_x),
 							start_size.Y.Scale,
 							math.clamp(start_size.Y.Offset + (inp.Position.Y - start.Y), og_size.Y.Offset, viewport_y)
 						)
@@ -444,11 +354,6 @@
 				Parent = gethui(),
 				Name = "",
 				DisplayOrder = 2000000,
-				-- MUST match the windows' coord space (they're IgnoreGuiInset now): the Aero
-				-- ghost + center guides live here and are positioned from the frame's no-inset
-				-- Position offsets. Without this the ghost renders ~36px (the topbar inset) off,
-				-- so snapping to the top overshoots and the window lands partly off-screen.
-				IgnoreGuiInset = true,
 			})
 			local outline = library:create("Frame", {
 				Parent = g,
@@ -487,20 +392,11 @@
 			}) library:apply_theme(library._guide_h, "accent", "BackgroundColor3")
 		end
 
-		function library:draggify(frame, key, handle)
-			-- `handle` (optional): only THIS object starts the drag, while `frame` still moves.
-			-- Lets a window drag from just its title bar instead of anywhere in the body.
+		function library:draggify(frame)
 			local start_size = frame.Position
 			local start
 
-			-- config-saved positions: a draggable passed a stable `key` is registered here so
-			-- capture_ui_positions can snapshot its Position on save and restore it on load.
-			if key then
-				library.ui_draggables = library.ui_draggables or {}
-				library.ui_draggables[key] = frame
-			end
-
-			(handle or frame).InputBegan:Connect(function(input)
+			frame.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
 					start = input.Position
 					start_size = frame.Position
@@ -670,13 +566,8 @@
 		end 
 
 		function library:get_config()
-			-- snapshot the live UI positions (dock, keybind list, every window panel,
-			-- watermark) into flags["ui_positions"] so they save with the config
-			if type(library.capture_ui_positions) == "function" then
-				pcall(function() library:capture_ui_positions() end)
-			end
 			local Config = {}
-
+		
 			for _, v in flags do
 				if type(v) == "table" and v.key then
 					Config[_] = {active = v.active, mode = v.mode, key = tostring(v.key)}
@@ -706,76 +597,7 @@
 					end
 				end 
 			end 
-			-- re-apply the saved main font (restoring the list selection alone doesn't re-font
-			-- the menu). A missing/unresolvable font falls back to Default inside apply_saved_font.
-			if type(library.apply_saved_font) == "function" then
-				pcall(function() library:apply_saved_font() end)
-			end
-		end
-
-		-- UI position persistence. Any draggable registered via draggify(frame, key) — the
-		-- dock, keybind list, every window panel and the watermark — gets its Position saved
-		-- with the config and restored on load. Positions are offset-only (draggify always
-		-- writes dim2(0,x,0,y)), so capture stores {xOffset, yOffset} and restore is a plain
-		-- set. capture runs inside get_config; the config_flags setter below runs on load.
-		function library:capture_ui_positions()
-			if not library.ui_draggables then return end
-			local out = {}
-			for key, frame in pairs(library.ui_draggables) do
-				if frame and frame.Parent then
-					local ok, pos = pcall(function() return frame.Position end)
-					local ok2, size = pcall(function() return frame.Size end)
-					if ok then
-						local entry = { pos.X.Offset, pos.Y.Offset }
-						-- entries 3 & 4 hold the frame's size (offset) so RESIZED windows persist
-						-- too. All registered draggables are offset-sized roots (scale 0), so the
-						-- offset alone round-trips; older configs without them skip size restore.
-						if ok2 then entry[3] = size.X.Offset; entry[4] = size.Y.Offset end
-						out[key] = entry
-					end
-				end
-			end
-			flags["ui_positions"] = out
-		end
-		library.config_flags["ui_positions"] = function(v)
-			if type(v) ~= "table" then return end
-			flags["ui_positions"] = v   -- keep it so a later re-save carries it forward
-			if not library.ui_draggables then return end
-			for key, pos in pairs(v) do
-				local frame = library.ui_draggables[key]
-				if frame and frame.Parent and type(pos) == "table" then
-					local x, y = tonumber(pos[1]), tonumber(pos[2])
-					if x and y then pcall(function() frame.Position = dim2(0, x, 0, y) end) end
-					-- restore saved size (offset) if present (newer configs only)
-					local w, h = tonumber(pos[3]), tonumber(pos[4])
-					if w and h then pcall(function() frame.Size = dim2(0, w, 0, h) end) end
-				end
-			end
-		end
-
-		-- Autoload: a small marker file (autoload.txt in the menu directory) holds the name
-		-- of the config to load automatically when the script runs. Set/cleared by the two
-		-- buttons in the Configs tab; consumed once at load by delta calling library:autoload().
-		function library:autoload_name()
-			local marker = library.directory .. "/autoload.txt"
-			if not (isfile and isfile(marker)) then return nil end
-			local ok, name = pcall(readfile, marker)
-			if not ok or type(name) ~= "string" then return nil end
-			name = name:gsub("^%s+", ""):gsub("%s+$", "")
-			if name == "" then return nil end
-			return name
-		end
-		
-		function library:autoload()
-			local name = library:autoload_name()
-			if not name then return nil end
-			local cfg_path = library.directory .. "/configs/" .. name .. ".cfg"
-			if not (isfile and isfile(cfg_path)) then return nil end
-			local ok, data = pcall(readfile, cfg_path)
-			if not (ok and data) then return nil end
-			pcall(function() library:load_config(data) end)
-			return name
-		end
+		end 
 		
 		function library:round(number, float) 
 			local multiplier = 1 / (float or 1)
@@ -788,62 +610,17 @@
 		end
 
 		function library:update_theme(theme, color)
-			for _, property in next, themes.utility[theme] do
+			for _, property in next, themes.utility[theme] do 
 
-				for m, object in next, property do
+				for m, object in next, property do 
 					if object[_] == themes.preset[theme] or object.ClassName == "UIGradient" then
-						object[_] = color
+						object[_] = color 
 					end
-				end
-			end
+				end 
+			end 
 
-			themes.preset[theme] = color
-
-			-- a flat repaint wipes the per-element two-tone colours, so re-spread
-			-- whenever the base colour of a two-toned channel moves
-			if library.two_tone and (theme == "accent" or theme == "glow") then
-				library:refresh_two_tone()
-			end
-		end
-
-		-- Two-tone: instead of one flat accent, every accented element takes the colour
-		-- at ITS horizontal position across the window — left edge = colour A, right edge
-		-- = colour B. Each element stays a flat colour (only the window glow and the top
-		-- bar are real gradients), which is what makes the whole menu read as one ramp.
-		--
-		-- This deliberately bypasses update_theme's `object[_] == preset` guard: that guard
-		-- exists so a repaint only touches elements still on the old colour, but here every
-		-- element is legitimately a DIFFERENT colour, so it would skip all of them.
-		function library:refresh_two_tone()
-			local root = library.two_tone_root
-			if not (library.two_tone and root and root.Parent) then return end
-			local x0, w = root.AbsolutePosition.X, root.AbsoluteSize.X
-			if w <= 0 then return end
-
-			local function spread(channel, a, b)
-				for property, objects in next, themes.utility[channel] do
-					for _, object in next, objects do
-						-- UIGradients hold a ColorSequence, not a Color3: give them the
-						-- full A->B ramp so big elements (glow, accent bar) sweep properly
-						if object.ClassName == "UIGradient" then
-							object[property] = rgbseq{rgbkey(0, a), rgbkey(1, b)}
-						else
-							local ok, pos = pcall(function() return object.AbsolutePosition end)
-							local ok2, size = pcall(function() return object.AbsoluteSize end)
-							if ok and ok2 then
-								-- sample at the element's CENTRE, clamped so popups and
-								-- panels parked outside the window still get an endpoint
-								local t = math.clamp(((pos.X + size.X * 0.5) - x0) / w, 0, 1)
-								object[property] = a:Lerp(b, t)
-							end
-						end
-					end
-				end
-			end
-
-			spread("accent", themes.preset.accent, library.accent_2 or themes.preset.accent)
-			spread("glow",   themes.preset.glow,   library.glow_2   or themes.preset.glow)
-		end
+			themes.preset[theme] = color 
+		end 
 
 		function library:connection(signal, callback)
 			local connection = signal:Connect(callback)
@@ -956,33 +733,23 @@
 					LineJoinMode = Enum.LineJoinMode.Miter
 				})
 
-				-- Hover shows this tooltip and registers it as THE active one; the single
-				-- shared driver below moves whichever tooltip is active. Previously every
-				-- tool_tip() created its own uis.InputChanged connection, so N tooltips = N
-				-- listeners all firing on every mouse move — this collapses that to one.
 				cfg.path.MouseEnter:Connect(function()
-					watermark_outline.Visible = true
-					library._tt_active = watermark_outline
-				end)
+					watermark_outline.Visible = true 
+				end)   
 
 				cfg.path.MouseLeave:Connect(function()
-					watermark_outline.Visible = false
-					if library._tt_active == watermark_outline then library._tt_active = nil end
+					watermark_outline.Visible = false 
 				end)
 
-				if not library._tt_driver then
-					library._tt_driver = true
-					library:connection(uis.InputChanged, function(input)
-						local tt = library._tt_active
-						if tt and tt.Visible and input.UserInputType == Enum.UserInputType.MouseMovement then
-							tt.Position = dim_offset(input.Position.X + 10, input.Position.Y + 10)
-						end
-					end)
-				end
-			end
-
+				library:connection(uis.InputChanged, function(input)
+					if watermark_outline.Visible and input.UserInputType == Enum.UserInputType.MouseMovement then
+						watermark_outline.Position = dim_offset(input.Position.X + 10, input.Position.Y + 10)
+					end
+				end)
+			end 
+			
 			return cfg
-		end
+		end 
 
 		function library:panel(options) 
 			local cfg = {
@@ -1004,12 +771,7 @@
 					items.sgui = library:create("ScreenGui", {
 						Enabled = true,
 						Parent = gethui(),
-						Name = "",
-						-- full-screen coord space: every draggable panel (main window, Style,
-						-- Config, ESP Preview, Playerlist, Output) is built on THIS gui, so this
-						-- is what lets a window (and Aero Snap) drag up past the topbar. Setting
-						-- it on the shared `sgui` alone (dock/popups) never moved the windows.
-						IgnoreGuiInset = true,
+						Name = "" 
 					})
 					
 					items.main_holder = library:create("Frame", {
@@ -1023,21 +785,7 @@
 						BorderSizePixel = 0,
 						BackgroundColor3 = themes.preset.outline
 					})
-					-- config-saved position: key by an explicit options.pos_key (the main window
-					-- passes one so a version-bumped name doesn't lose its saved spot) or the
-					-- panel's name, which is stable for Style/Config/ESP Preview/Playerlist/Output
-					if options.top_drag then
-						-- restrict dragging to a top title-bar strip so the body stays free for
-						-- interactive content (e.g. the ESP builder). Sits left of the Close X.
-						items.drag_strip = library:create("Frame", {
-							Parent = items.main_holder; Name = ""; Active = true;
-							BackgroundTransparency = 1; BorderSizePixel = 0;
-							Position = dim2(0, 0, 0, 0); Size = dim2(1, -24, 0, 22); ZIndex = 60;
-						})
-						library:draggify(items.main_holder, options.pos_key or ("panel:" .. cfg.name), items.drag_strip)
-					else
-						library:draggify(items.main_holder, options.pos_key or ("panel:" .. cfg.name))
-					end
+					library:draggify(items.main_holder)
 					library:make_resizable(items.main_holder)
 
 					local Close = library:create( "TextButton" , {
@@ -1292,8 +1040,7 @@
 			Enabled = true,
 			Parent = gethui(),
 			Name = "",
-			IgnoreGuiInset = true,   -- full-screen coord space so the window (and Aero Snap) can drag up past the topbar
-			DisplayOrder = 999999,
+			DisplayOrder = 999999, 
 		})
 
 		local notif_holder = library:create("ScreenGui", {
@@ -1328,7 +1075,7 @@
 					Size = dim2(0, 322, 0, 147);
 					BorderSizePixel = 0;
 					BackgroundColor3 = themes.preset.outline
-				});	library:apply_theme(items.Window, "outline", "BackgroundColor3"); library:draggify(items.Window, "indicator")
+				});	library:apply_theme(items.Window, "outline", "BackgroundColor3"); library:draggify(items.Window)
 				
 				items.InfoTitle = library:create( "TextLabel" , {
 					FontFace = library.font;
@@ -1654,22 +1401,16 @@
 					Visible = true,
 					BorderColor3 = rgb(0, 0, 0),
 					AnchorPoint = vec2(0.5, 0),
-					-- top-center, dropped below the Roblox topbar. This gui is IgnoreGuiInset
-					-- now, so offset 0 = the true screen top; 56 = ~the old 20 + 36px inset,
-					-- putting the dock back under the topbar instead of jammed at the edge.
-					Position = dim2(0.5, 0, 0, 56),
-					-- width is hand-fitted to the button count: 4px pad + n*25 buttons +
-					-- (n-1)*5 gaps + 4px pad + 2px lining. Six panels => 187. Bump this
-					-- when a panel is added or the last icon spills outside the frame.
-					Size = dim2(0, 187, 0, 39),
+					Position = dim2(0.5, 0, 0, 20),
+					Size = dim2(0, 157, 0, 39),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
 				}); 
 
 				library:apply_theme(dock_outline, "outline", "BackgroundColor3"); 
 				dock_outline.Position = dim2(0, dock_outline.AbsolutePosition.X, 0, dock_outline.AbsolutePosition.Y); 
-				dock_outline.AnchorPoint = vec2(0, 0);
-				library:draggify(dock_outline, "dock");
+				dock_outline.AnchorPoint = vec2(0, 0); 
+				library:draggify(dock_outline);
 
 				local dock_inline = library:create("Frame", {
 					Parent = dock_outline,
@@ -1761,10 +1502,10 @@
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
 				})
-				library:apply_theme(outline, "outline", "BackgroundColor3")
-				library:draggify(outline, "keybind_list")
+				library:apply_theme(outline, "outline", "BackgroundColor3") 
+				library:draggify(outline)
 				library:make_resizable(outline)
-				library.keybind_list_frame = outline
+				library.keybind_list_frame = outline 
 				
 				local inline = library:create("Frame", {
 					Parent = outline,
@@ -1903,22 +1644,12 @@
 			--  
 
 			-- main window
-				-- each panel registers its dock ImageLabel + base filename so Style > Icon
-				-- Style can re-skin the whole dock. custom = the "<name>2.png" variant.
-				local function register_icon(panel, base, custom, fallback)
-					library.icon_panels[#library.icon_panels + 1] = {
-						icon = panel.items.Icon, base = base, custom = custom, fallback = fallback,
-					}
-				end
-
 				local main_window = library:panel({
 					name = properties and properties.name or "Fem.Hook | ",
-					pos_key = "MainWindow",   -- stable key: the name carries the version, which changes
 					size = dim2(0, 604, 0, 628),
 					position = dim2(0, (camera.ViewportSize.X / 2) - 302 - 96, 0, (camera.ViewportSize.Y / 2) - 421 - 12),
-					image = library:image("main.png", "rbxassetid://98823308062942"),
+					image = "rbxassetid://98823308062942",
 				})
-				register_icon(main_window, "main.png", "home2.png", "rbxassetid://98823308062942")
 
 				local items = main_window.items
 
@@ -2006,13 +1737,9 @@
 					}
 				})
 				
-				library:apply_theme(UIGradient, "contrast", "Color")
-				library:make_resizable(items.main_holder)
-				-- referenced by library:column so a 3-lane page can raise this window's
-				-- resize floor and grow it to fit (see library:column lane handling).
-				library._main_holder = items.main_holder
-				library.min_widths = library.min_widths or {}
-			--
+				library:apply_theme(UIGradient, "contrast", "Color") 
+				library:make_resizable(items.main_holder) 
+			-- 
 
 			-- theming 
 				local style = library:panel({
@@ -2020,9 +1747,8 @@
 					anchor_point = vec2(0, 0),
 					size = dim2(0, 394, 0, 464),
 					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X + main_window.items.main_holder.AbsoluteSize.X + 2, 0, main_window.items.main_holder.AbsolutePosition.Y),
-					image = library:image("style.png", "rbxassetid://115194686863276"),
+					image = "rbxassetid://115194686863276",
 				})
-				register_icon(style, "style.png", "style2.png", "rbxassetid://115194686863276")
 
 				local watermark = library:watermark({default = os.date('Fem.Hook |  - %b %d %Y - %H:%M:%S')})  
 
@@ -2117,95 +1843,68 @@
 				:colorpicker({name = "Glow", color = themes.preset.glow, callback = function(color, alpha)
 					library:update_theme("glow", color)
 				end, flag = "Glow"})
-				-- everything that isn't a colour now lives in a tabbed pair: "Accessibility"
-				-- holds the binds/watermark/sound settings, "Other" holds the sliders and
-				-- the server/clipboard buttons (Blur Size moved out of Theme to join them)
-				local access_section, other_section = column:multi_section({names = {"Accessibility", "Other"}})
-
-				-- accessibility tab
-					access_section:label({name = "UI Bind"})
-					:keybind({callback = window.set_menu_visibility, key = Enum.KeyCode.Insert})
-					access_section:toggle({name = "Keybind List", flag = "keybind_list", callback = function(bool)
-						library.keybind_list_frame.Visible = bool
-					end})
-					local wm_tgl = access_section:toggle({name = "Watermark", flag = "watermark", callback = function(bool)
-						watermark.set_visible(bool)
-					end})
-					local wm_opts = wm_tgl:plus({name = "Watermark Options"})
-					wm_opts:label({name = "Watermark Elements"})
-					wm_opts:dropdown({name = "Elements", flag = "watermark_elements", multi = true,
-						items = {"User", "Version", "FPS", "Ping", "UID", "Game", "Date", "Time"},
-						default = {"User", "Version", "FPS", "Ping", "Date", "Time"}})
-					wm_opts:label({name = "Custom Watermark Text"})
-					wm_opts:textbox({name = "Watermark Text", flag = "watermark_text", default = "fem.hook", placeholder = "watermark text", callback = function(text) end})
-					access_section:toggle({name = "Aero Snap", flag = "aero_snap", default = false})
-					-- the dropdowns are left unnamed on purpose: the label above is the
-					-- heading, so a second inline name would just print the text twice
-					access_section:label({name = "Click Sound Style"})
-					local ui_click_custom
-					access_section:dropdown({flag = "ui_click_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
-						callback = function(v) if ui_click_custom then ui_click_custom.set_element_visible(v == "Custom") end end})
-					ui_click_custom = access_section:textbox({name = "Click Sound ID", flag = "ui_click_custom", placeholder = "soundid here", callback = function(text) end})
-					ui_click_custom.set_element_visible(false)
-					access_section:slider({name = "Click Sound Volume", flag = "ui_click_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
-					access_section:label({name = "Drag Sound Style"})
-					local ui_drag_custom
-					access_section:dropdown({flag = "ui_drag_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
-						callback = function(v) if ui_drag_custom then ui_drag_custom.set_element_visible(v == "Custom") end end})
-					ui_drag_custom = access_section:textbox({name = "Drag Sound ID", flag = "ui_drag_custom", placeholder = "soundid here", callback = function(text) end})
-					ui_drag_custom.set_element_visible(false)
-					access_section:slider({name = "Drag Sound Volume", flag = "ui_drag_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
-				--
-
-				-- other tab
-					-- dock/panel icon set. Basic = the shipped icons; Custom = the variant set:
-					-- home2 (main), style2, configs2 (configurations), esp_preview2 (ESP button),
-					-- output2 (Output), playerlist2. Any custom file that isn't in the images repo
-					-- falls back to its basic icon and logs which one was missing to the console.
-					other_section:dropdown({name = "Icon Style", flag = "icon_style", items = {"Basic", "Custom"}, default = "Basic",
-						callback = function(v) library:apply_icon_style(v) end})
-					-- global animation rate: every animated effect (ESP box gradients,
-					-- healthbar sweeps, cham pulses) recomputes at this cadence instead of
-					-- once per rendered frame, so it doubles as an animation perf cap
-					other_section:slider({name = "Animation Frequency", flag = "anim_freq", min = 15, max = 240, default = 60, interval = 1, suffix = "hz/240hz"})
-					-- global speed multiplier applied on top of each effect's own rate
-					other_section:slider({name = "Animation Speed", flag = "anim_speed", min = 0.1, max = 3, default = 1, interval = 0.1, suffix = "/3"})
-					other_section:slider({name = "Blur Size", flag = "Blur Size", min = 0, max = 56, default = 15, interval = 1, suffix = "/56", callback = function(int)
-						if window.opened then
-							blur.Size = int
-						end
-					end})
-					other_section:slider({name = "Max Players", flag = "max_players", min = 0, max = 40, default = 15, interval = 1})
-					-- one holder per row: buttons sharing a holder split the width evenly
-					other_section:button_holder({})
-					-- these log the copied value, not just "copied": a clipboard write is
-					-- silent, so the Output panel is the only confirmation you actually
-					-- got the id you wanted (and you can re-read it after the fact)
-					other_section:button({name = "Copy JobId", callback = function()
-						setclipboard(game.JobId)
-						library:log("Copied JobId: " .. tostring(game.JobId), "SUCCESS")
-					end})
-					other_section:button({name = "Copy GameID", callback = function()
-						setclipboard(game.GameId)
-						library:log("Copied GameId: " .. tostring(game.GameId), "SUCCESS")
-					end})
-					other_section:button({name = "Copy Join Script", callback = function()
-						setclipboard('game:GetService("TeleportService"):TeleportToPlaceInstance(' .. game.PlaceId .. ', "' .. game.JobId .. '", game.Players.LocalPlayer)')
-						library:log("Copied join script for place " .. tostring(game.PlaceId) .. " / job " .. tostring(game.JobId), "SUCCESS")
-					end})
-					other_section:button_holder({})
-					other_section:button({name = "Rejoin Server", callback = function()
-						game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, lp)
-					end})
-					other_section:button({name = "Join New Server", callback = function()
-						local apiRequest = game:GetService("HttpService"):JSONDecode(game:HttpGetAsync("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
-						local data = apiRequest.data[random(1, #apiRequest.data)]
-
-						if data.playing <= flags["max_players"] then
-							game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, data.id)
-						end
-					end})
-				--
+				section:slider({name = "Blur Size", flag = "Blur Size", min = 0, max = 56, default = 15, interval = 1, callback = function(int)
+					if window.opened then 
+						blur.Size = int
+					end
+				end})
+				local section = column:section({name = "Other"})
+				section:label({name = "UI Bind"})
+				:keybind({callback = window.set_menu_visibility, key = Enum.KeyCode.Insert})
+				section:toggle({name = "Keybind List", flag = "keybind_list", callback = function(bool)
+					library.keybind_list_frame.Visible = bool
+				end})
+				local wm_tgl = section:toggle({name = "Watermark", flag = "watermark", callback = function(bool)
+					watermark.set_visible(bool)
+				end})
+				local wm_opts = wm_tgl:plus({name = "Watermark Options"})
+				wm_opts:label({name = "Watermark Elements"})
+				wm_opts:dropdown({name = "Elements", flag = "watermark_elements", multi = true,
+					items = {"User", "Version", "FPS", "Ping", "UID", "Game", "Date", "Time"},
+					default = {"User", "Version", "FPS", "Ping", "Date", "Time"}})
+				wm_opts:label({name = "Custom Watermark Text"})
+				wm_opts:textbox({name = "Watermark Text", flag = "watermark_text", default = "fem.hook", placeholder = "watermark text", callback = function(text) end})
+				section:toggle({name = "Aero Snap", flag = "aero_snap", default = false})
+				section:label({name = "Click Sound"})
+				local ui_click_custom
+				section:dropdown({name = "Click Sound", flag = "ui_click_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
+					callback = function(v) if ui_click_custom then ui_click_custom.set_element_visible(v == "Custom") end end})
+				ui_click_custom = section:textbox({name = "Click Sound ID", flag = "ui_click_custom", placeholder = "soundid here", callback = function(text) end})
+				ui_click_custom.set_element_visible(false)
+				section:slider({name = "Click Volume", flag = "ui_click_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
+				section:label({name = "Drag Sound"})
+				local ui_drag_custom
+				section:dropdown({name = "Drag Sound", flag = "ui_drag_style", items = {"Off", "Neverlose", "Custom"}, default = "Off",
+					callback = function(v) if ui_drag_custom then ui_drag_custom.set_element_visible(v == "Custom") end end})
+				ui_drag_custom = section:textbox({name = "Drag Sound ID", flag = "ui_drag_custom", placeholder = "soundid here", callback = function(text) end})
+				ui_drag_custom.set_element_visible(false)
+				section:slider({name = "Drag Volume", flag = "ui_drag_vol", min = 0, max = 10, default = 1, interval = 0.1, suffix = "/10"})
+				section:button_holder({})
+				section:button({name = "Copy JobId", callback = function()
+					setclipboard(game.JobId)
+				end})
+				section:button_holder({})
+				section:button({name = "Copy GameID", callback = function()
+					setclipboard(game.GameId)
+				end})
+				section:button_holder({})
+				section:button({name = "Copy Join Script", callback = function()
+					setclipboard('game:GetService("TeleportService"):TeleportToPlaceInstance(' .. game.PlaceId .. ', "' .. game.JobId .. '", game.Players.LocalPlayer)')
+				end})
+				section:button_holder({})
+				section:button({name = "Rejoin", callback = function()
+					game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, lp)
+				end})
+				section:button_holder({})
+				section:button({name = "Join New Server", callback = function()
+					local apiRequest = game:GetService("HttpService"):JSONDecode(game:HttpGetAsync("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
+					local data = apiRequest.data[random(1, #apiRequest.data)]
+						
+					if data.playing <= flags["max_players"] then 
+						game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, data.id)
+					end 
+				end})
+				section:slider({name = "Max Players", flag = "max_players", min = 0, max = 40, default = 15, interval = 1})
 			-- 
 
 			-- cfg holder
@@ -2213,9 +1912,8 @@
 					name = "Configurations", 
 					size = dim2(0, 324, 0, 410),
 					position = dim2(0, items.main_holder.AbsolutePosition.X + items.main_holder.AbsoluteSize.X + 2, 0, items.main_holder.AbsolutePosition.Y),
-					image = library:image("configurations.png", "rbxassetid://105199726008012"),
-				})
-				register_icon(holder, "configurations.png", "configs2.png", "rbxassetid://105199726008012")
+					image = "rbxassetid://105199726008012",
+				}) 
 
 				local items = holder.items
 
@@ -2227,9 +1925,7 @@
 				local configSec, fontSec = column:multi_section({names = {"Configs", "Fonts"}})
 
 				-- configs tab
-					-- shorter list so the whole Configs tab (list + all button rows) fits inside
-					-- the fixed panel instead of overflowing out the bottom
-					config_holder = configSec:list({flag = "config_name_list", size = 150})
+					config_holder = configSec:list({flag = "config_name_list"})
 					configSec:textbox({flag = "config_name_text_box"})
 					configSec:button_holder({})
 					configSec:button({name = "Create", callback = function()
@@ -2254,27 +1950,6 @@
 					configSec:button({name = "Refresh Configs", callback = function()
 						library:config_list_update()
 					end})
-					local function autoloadStatusText()
-						local n = library:autoload_name()
-						return n and ("Autoloading: " .. n .. "   :3") or "Autoload: off"
-					end
-					configSec:button_holder({})
-					local autoStatus = configSec:label({name = autoloadStatusText()})
-					configSec:button_holder({})
-					configSec:button({name = "Set Autoload", callback = function()
-						local name = flags["config_name_list"]
-						if not name or name == "" then library:notification({text = "Select a config first", time = 3}); return end
-						pcall(function() writefile(library.directory .. "/autoload.txt", name) end)
-						autoStatus.set(autoloadStatusText())
-						library:notification({text = "Autoload set: " .. name, time = 3})
-					end})
-					configSec:button({name = "Disable Autoload", callback = function()
-						pcall(function()
-							if isfile(library.directory .. "/autoload.txt") then delfile(library.directory .. "/autoload.txt") end
-						end)
-						autoStatus.set(autoloadStatusText())
-						library:notification({text = "Autoload disabled", time = 3})
-					end})
 					configSec:button_holder({})
 					configSec:button({name = "Unload Config", callback = function()
 						library:load_config(library.old_config)
@@ -2296,19 +1971,8 @@
 				-- fonts tab
 					local defaultFont = library.font
 					local font_holder = nil
-					local fontBold = false          -- Bold toggle state
-					local lastBaseFont = defaultFont -- last picked family (pre-bold), so the toggle can re-weight it
-
-					-- re-weight a font to Bold when the toggle is on (leaves it as-is otherwise)
-					local function withBold(font)
-						if not fontBold then return font end
-						local ok, bf = pcall(function() return Font.new(font.Family, Enum.FontWeight.Bold, font.Style) end)
-						return (ok and bf) or font
-					end
 
 					local function applyLibFont(font)
-						lastBaseFont = font
-						font = withBold(font)
 						library.font = font
 						local function updateGui(gui)
 							pcall(function()
@@ -2343,15 +2007,6 @@
 						["[Nunito]"]          = function() return Font.new("rbxasset://fonts/families/Nunito.json") end,
 					}
 					local PRESET_ORDER = {"[Default]","[Source Sans Pro]","[Inconsolata]","[Roboto Mono]","[Ubuntu]","[Montserrat]","[Nunito]"}
-					-- append EVERY built-in Roblox font family (the whole Enum.Font list) so the
-					-- picker offers all of them, not just the seven hand-picked presets above
-					for _, f in ipairs(Enum.Font:GetEnumItems()) do
-						local nm = "[" .. f.Name .. "]"
-						if f ~= Enum.Font.Unknown and not PRESET_FONTS[nm] then
-							PRESET_FONTS[nm]  = function() return Font.fromEnum(f) end
-							PRESET_ORDER[#PRESET_ORDER + 1] = nm
-						end
-					end
 
 					function library:font_list_update()
 						if not font_holder then return end
@@ -2373,45 +2028,6 @@
 					end
 
 					font_holder = fontSec:list({flag = "lib_font_list"})
-					-- Bold toggle: re-weights the currently applied family to Bold (or back)
-					fontSec:toggle({name = "Bold", flag = "lib_font_bold", default = false,
-						callback = function(v) fontBold = v == true; applyLibFont(lastBaseFont) end})
-
-						-- Auto-apply the saved font on config load. Resolves flags["lib_font_list"] the
-						-- SAME way Apply Font does (preset family or custom .ttf) and honours the saved
-						-- Bold state. Anything missing/unresolvable (deleted preset, .ttf not on disk,
-						-- getcustomasset failure) silently falls back to the Default font instead of
-						-- erroring. Called from library:load_config.
-						function library:apply_saved_font()
-							fontBold = flags["lib_font_bold"] == true   -- sync Bold from the loaded config
-							local sel = flags["lib_font_list"]
-							if not sel or sel == "" then applyLibFont(defaultFont); return end
-							if PRESET_FONTS[sel] then
-								local ok, f = pcall(function()
-									return type(PRESET_FONTS[sel]) == "function" and PRESET_FONTS[sel]() or PRESET_FONTS[sel]
-								end)
-								applyLibFont((ok and f) or defaultFont)   -- bad preset -> default
-								return
-							end
-							local filename = sel:match("[^\\/]+$") or sel
-							local path = fontPathMap[filename]
-							if not path then applyLibFont(defaultFont); return end   -- not found -> default
-							local ok, f = pcall(function()
-								local norm_path = path:gsub("\\", "/")
-								local ttf_asset = getcustomasset(norm_path)
-								assert(ttf_asset and ttf_asset ~= "", "getcustomasset failed")
-								local font_name = filename:gsub("%.[^%.]+$", "")
-								local descriptor = http_service:JSONEncode({
-									name = font_name,
-									faces = {{ name = "Regular", weight = 400, style = "normal", assetId = ttf_asset }}
-								})
-								writefile("_atl_font.ttf", descriptor)
-								local json_asset = getcustomasset("_atl_font.ttf")
-								assert(json_asset and json_asset ~= "", "descriptor getcustomasset failed")
-								return Font.new(json_asset, Enum.FontWeight.Regular)
-							end)
-							applyLibFont((ok and f) or defaultFont)   -- load error -> default
-						end
 					fontSec:button_holder({})
 					fontSec:button({name = "Apply Font", callback = function()
 						local sel = flags["lib_font_list"]
@@ -2471,22 +2087,17 @@
 					
 			-- esp preview
 				local holder = library:panel({
-					name = "ESP Preview",
+					name = "ESP Preview", 
 					anchor_point = vec2(0, 0),
 					size = dim2(0, 300, 0, 325),
-					top_drag = true,   -- only the title bar drags the window (body = ESP builder)
 					position = dim2(0, style.items.main_holder.AbsolutePosition.X, 0, style.items.main_holder.AbsolutePosition.Y + style.items.main_holder.AbsoluteSize.Y + 2),
-					-- the "</>" glyph is just what this icon set ships; it's the ESP Preview button
-					image = library:image("output.png", "rbxassetid://77684377836328"),
-				})
-				register_icon(holder, "output.png", "esp_preview2.png", "rbxassetid://77684377836328")
-
+					image = "rbxassetid://77684377836328",
+				})  
+				
 				local items = holder.items
-
-				local column = setmetatable(items, library):column()
-				-- blank title: the MAIN/AI tab row (built in esp_preview) names this panel,
-				-- so a "Main" section header here would just duplicate it
-				window.esp_section = column:section({name = ""})
+				
+				local column = setmetatable(items, library):column() 
+				window.esp_section = column:section({name = "Main"})
 			--  
 
 			-- playerlist 
@@ -2495,54 +2106,18 @@
 					anchor_point = vec2(0, 0),
 					size = dim2(0, 529, 0, 445),
 					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X - 531, 0, main_window.items.main_holder.AbsolutePosition.Y),
-					image = library:image("playerlist.png", "rbxassetid://107070078834415"),
-				})
-				register_icon(holder, "playerlist.png", "playerlist2.png", "rbxassetid://107070078834415")
-
+					image = "rbxassetid://107070078834415",
+				})  
+				
 				local items = holder.items
 
 				local column = setmetatable(items, library):column() 
 				local section = column:section({name = "Playerlist"})
 				local playerlist = section:playerlist({})
-				-- only two classifications now (Friendly / Enemy); stored on library so the
-				-- row-click handler can hide it when the LocalPlayer row is selected
-				library.playerlist_dropdown = section:dropdown({name = "Priority", items = {"Friendly", "Enemy"}, default = "Enemy", flag = "PLAYERLIST_DROPDOWN", callback = function(text)
+				section:dropdown({name = "Priority", items = {"Enemy", "Priority", "Neutral", "Friendly"}, default = "Neutral", flag = "PLAYERLIST_DROPDOWN", callback = function(text)
 					library.prioritize(text)
 				end})
-			--
-
-			-- output / debug console
-				local holder = library:panel({
-					name = "Output",
-					anchor_point = vec2(0, 0),
-					size = dim2(0, 529, 0, 300),
-					position = dim2(0, main_window.items.main_holder.AbsolutePosition.X - 531, 0, main_window.items.main_holder.AbsolutePosition.Y + 447),
-					image = library:image("output.png", "rbxassetid://77684377836328"),
-				})
-				register_icon(holder, "output.png", "output2.png", "rbxassetid://77684377836328")
-
-				local items = holder.items
-
-				local column = setmetatable(items, library):column()
-				local section = column:section({name = "Output"})
-
-				library.console = section:console({height = 190})
-
-				section:button_holder({})
-				section:button({name = "Clear Output", callback = function()
-					library.console.clear()
-				end})
-
-				-- replay anything logged before this panel existed, so the log reads in
-				-- real order instead of starting from whenever the UI happened to build
-				for _, entry in next, library.log_buffer do
-					library.console.add(entry.text, entry.level)
-				end
-				library.log_buffer = {}
-
-				library:log("Initializing " .. tostring((properties and properties.name) or "menu") .. "...", "INFO")
-				library:log("Loaded successfully!", "SUCCESS")
-			--
+			--  
 
 			return setmetatable(window, library)
 		end
@@ -2567,7 +2142,7 @@
 				BackgroundColor3 = themes.preset.outline
 			}) library:apply_theme(watermark_outline, "outline", "BackgroundColor3") 
 			watermark_outline.Position = dim_offset(watermark_outline.AbsolutePosition.X, watermark_outline.AbsolutePosition.Y)
-			library:draggify(watermark_outline, "watermark")
+			library:draggify(watermark_outline)
 
 			local watermark_inline = library:create("Frame", {
 				Parent = watermark_outline,
@@ -2619,7 +2194,6 @@
 				Parent = watermark_background,
 				Name = "",
 				FontFace = library.font,
-				RichText = true,   -- shimmer paints each character its own color
 				TextColor3 = themes.preset.text,
 				BorderColor3 = rgb(0, 0, 0),
 				Text = "  drain.lol | Tester | Aug 29 2024 | 07:29:00  ",
@@ -2648,64 +2222,30 @@
 				BackgroundColor3 = themes.preset.accent
 			}) library:apply_theme(accent, "accent", "BackgroundColor3") 
 			
-			local accent_shine = library:create("UIGradient", {
+			local UIGradient = library:create("UIGradient", {
 				Parent = accent,
 				Name = "",
-				Rotation = 0,   -- horizontal so its Offset sweeps a sheen across the bar
+				Rotation = 90,
 				Color = rgbseq{
-					rgbkey(0,   rgb(167, 167, 167)),
-					rgbkey(0.5, rgb(255, 255, 255)),
-					rgbkey(1,   rgb(167, 167, 167))
+					rgbkey(0, rgb(255, 255, 255)),
+					rgbkey(1, rgb(167, 167, 167))
 				}
 			})
-
-			local plain_text = cfg.default
-
+			
 			function cfg.change_text(input)
-				plain_text = tostring(input or "")
-				text.Text = "  " .. plain_text .. "  "   -- instant plain update; shimmer recolors it
-			end
+				text.Text = "  ".. input .."  "
+			end 
 
-			function cfg.set_visible(bool)
+			function cfg.set_visible(bool) 
 				watermark_outline.Visible = bool
-			end
+			end 
 
-			-- Shimmer (ExampleLib port): a bright accent-colored shine sweeps across the text,
-			-- per-character (RichText color lerp text -> accent), and the top accent bar's
-			-- gradient sweeps with it. Reads the LIVE theme each tick, so an animated accent
-			-- carries straight into the shimmer. Throttled to ~30hz to keep string churn cheap.
-			do
-				local phase, last, shine_width = 0, tick(), 6
-				library:connection(run.RenderStepped, function()
-					if not watermark_outline.Visible then return end
-					local now = tick()
-					if now - last < (1 / 30) then return end
-					phase = (phase + (now - last) * (1 / 1.2)) % 1
-					last = now
-
-					local body      = "  " .. plain_text .. "  "
-					local shine_pos = phase * (#body + shine_width)
-					local text_col  = themes.preset.text
-					local accent_col= themes.preset.accent
-					local rich = {}
-					for i = 1, #body do
-						local dist = math.abs(i - shine_pos)
-						local a    = math.clamp(1 - (dist / shine_width), 0, 1)
-						local c    = text_col:Lerp(accent_col, a)
-						rich[i] = string.format('<font color="rgb(%d,%d,%d)">%s</font>',
-							math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255),
-							body:sub(i, i))
-					end
-					text.Text = table.concat(rich)
-					accent_shine.Offset = vec2((phase * 2) - 1, 0)
-				end)
-			end
 
 			cfg.change_text(cfg.default)
 
-			return cfg
+			return cfg 
 
-		end
+		end 
 
 		function library:esp_preview(properties)
 			local cfg = {items = {}, rotation = 0; objects = {};}
@@ -2745,255 +2285,12 @@
 					items.camera.CameraSubject = character
 				end
 
-				-- NH-style preview: the model faces you by default instead of auto-spinning.
-				-- Drag inside the viewport to orbit it; on release it eases back to the front
-				-- view. Resilient to the character being swapped/refreshed (character upvalue).
-				local FRONT = 180                 -- 180° faces the tracking camera (front-facing)
-				cfg.rotation = FRONT
-				cfg.target_rotation = FRONT
-				local dragging, drag_start_x, drag_start_rot = false, 0, FRONT
-
-				items.viewportframe.Active = true   -- so the viewport captures mouse input
-				library:connection(items.viewportframe.InputBegan, function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1
-						or input.UserInputType == Enum.UserInputType.Touch then
-						dragging = true
-						drag_start_x = input.Position.X
-						drag_start_rot = cfg.rotation
-					end
-				end)
-				library:connection(uis.InputChanged, function(input)
-					if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-						or input.UserInputType == Enum.UserInputType.Touch) then
-						cfg.rotation = drag_start_rot + (input.Position.X - drag_start_x) * 0.6
-						cfg.target_rotation = cfg.rotation
-					end
-				end)
-				library:connection(uis.InputEnded, function(input)
-					if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
-						or input.UserInputType == Enum.UserInputType.Touch) then
-						dragging = false
-						cfg.target_rotation = FRONT   -- let the per-frame ease glide it home
-					end
-				end)
-
-				-- project a world point into the viewport frame's local pixel space. The viewport
-				-- has its own plain Camera (not the real one), so do the perspective divide by
-				-- hand off its live CFrame + FOV against the frame's on-screen size.
-				local function vp_project(world_pos)
-					local cam = items.camera
-					local vp = items.viewportframe.AbsoluteSize
-					if vp.X <= 0 or vp.Y <= 0 then return nil end
-					local rel = cam.CFrame:PointToObjectSpace(world_pos)
-					local depth = -rel.Z
-					if depth <= 0.05 then return nil end
-					local tan_half = math.tan(math.rad(cam.FieldOfView) * 0.5)
-					local aspect = vp.X / vp.Y
-					local sx = ( rel.X / (depth * tan_half * aspect) * 0.5 + 0.5) * vp.X
-					local sy = (-rel.Y / (depth * tan_half)          * 0.5 + 0.5) * vp.Y
-					return vec2(sx, sy), depth
-				end
-
-				-- size + place the box exactly like the real player ESP: Dynamic projects the
-				-- root's up-axis for a torso-anchored, fixed-aspect box; Static scales by depth.
-				-- Everything (name / hp / distance / corners) hangs off the holder, so the whole
-				-- tag rides the box — it's drawn ONTO the character, not floated over it.
-				local function update_preview_box()
-					local hrp = character and character.PrimaryPart
-					local holder = cfg.objects.holder
-					if not (hrp and holder) then return end
-					local hpos = hrp.Position
-					local w, h, cx, cy
-					if flags["Box_Sizing"] == "Static" then
-						local sp, depth = vp_project(hpos)
-						if not sp then return end
-						local sf = items.viewportframe.AbsoluteSize.Y
-							/ (2 * depth * math.tan(math.rad(items.camera.FieldOfView) * 0.5))
-						h = math.max(sf * (flags["Static_Box_Y"] or 5), 10)
-						w = math.max(sf * (flags["Static_Box_X"] or 2.5), 8)
-						cx, cy = sp.X, sp.Y
-					else
-						local up = hrp.CFrame.UpVector
-						local spT = vp_project(hpos + up * 2)
-						local spB = vp_project(hpos - up * 2.8)
-						if not (spT and spB) then return end
-						local raw_h = math.abs(spB.Y - spT.Y)
-						if raw_h <= 0 then return end
-						local pad = flags["Dynamic_Box_Padding"] or 1
-						h  = raw_h * pad
-						w  = (raw_h / 1.5) * pad
-						cx = (spT.X + spB.X) * 0.5
-						cy = math.min(spT.Y, spB.Y) + raw_h * 0.5
-					end
-					holder.Size = dim2(0, w, 0, h)
-					holder.Position = dim2(0, cx, 0, cy)
-				end
-
-				-- the R15 bone pairs the real ESP skeleton draws, projected into the viewport
-				local PREVIEW_BONES = {
-					{"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
-					{"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
-					{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
-					{"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
-					{"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
-				}
-				local mat_saved = {}   -- Enemy Material restore cache { part -> {mat, col, transp} }
-
-				-- Per-frame ESP elements that can't be a plain reparent: chams, enemy material,
-				-- head dot and skeleton (both projected), and the ammo-fill fraction. Reads the
-				-- live player-ESP flags so the preview reacts to every toggle — the base a future
-				-- ESP builder edits against.
-				local function update_preview_overlays()
-					local o = cfg.objects
-					if not (character and o) then return end
-					-- skip the heavy work (projection / material recolor) while the menu is closed
-					if not cfg._preview_sg then cfg._preview_sg = items.viewportframe:FindFirstAncestorWhichIsA("ScreenGui") end
-					if cfg._preview_sg and not cfg._preview_sg.Enabled then return end
-					local enabled = flags["Enabled"]
-					-- builder toggle state for the global visuals (box/skeleton/chams/head_dot).
-					-- nil until the ESP builder wires up -> fall back to the real flags.
-					local B = cfg._show
-
-					-- Chams: when the builder is up (B), a cheap smaller box INSIDE the main box
-					-- (no per-frame Highlight cost). The real Highlight only runs in the
-					-- non-builder fallback (B == nil).
-					if o.chams_box then
-						local cham_on = enabled and (B and B.chams) == true
-						o.chams_box.Visible = cham_on
-						if cham_on then
-							local fc = flags["Chams_Fill_Color"]
-							if fc and fc.Color then
-								o.chams_box.BackgroundColor3 = fc.Color
-								local st = o.chams_box:FindFirstChildOfClass("UIStroke")
-								if st then st.Color = fc.Color end
-							end
-						end
-					end
-					if o.chams then
-						if not B and enabled and flags["Chams"] then
-							o.chams.Adornee = character
-							local oc = flags["Chams_Outline"];     if oc and oc.Color then o.chams.OutlineColor = oc.Color end
-							local fc = flags["Chams_Fill_Color"];  if fc and fc.Color then o.chams.FillColor    = fc.Color end
-							o.chams.OutlineTransparency = flags["Chams_Outline_On"] and (1 - (flags["Chams_Outline_Opacity"] or 100) / 100) or 1
-							o.chams.FillTransparency    = flags["Chams_Fill"]       and (1 - (flags["Chams_Fill_Opacity"]    or 100) / 100) or 1
-							o.chams.Enabled = true
-						else
-							o.chams.Enabled = false
-						end
-					end
-
-					-- Enemy Material (recolor the viewport character; restored on toggle-off)
-					if enabled and flags["esp_mat_enabled"] then
-						local ok, mat = pcall(function() return Enum.Material[flags["esp_mat_choice"] or "Neon"] end)
-						if not ok then mat = Enum.Material.Neon end
-						local col = (flags["esp_mat_color_on"] and flags["esp_mat_color"] and flags["esp_mat_color"].Color) or nil
-						local tr  = math.clamp((flags["esp_mat_transp"] or 0) / 100, 0, 0.99)
-						for _, p in ipairs(character:GetDescendants()) do
-							if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
-								if mat_saved[p] == nil then mat_saved[p] = {p.Material, p.Color, p.Transparency} end
-								p.Material = mat
-								if col then p.Color = col end
-								if mat_saved[p][3] < 1 then p.Transparency = tr end
-							end
-						end
-					elseif next(mat_saved) then
-						for p, s in pairs(mat_saved) do
-							if p.Parent then pcall(function() p.Material = s[1]; p.Color = s[2]; p.Transparency = s[3] end) end
-							mat_saved[p] = nil
-						end
-					end
-
-					-- Head dot (projected onto the head)
-					if o.head_dot then
-						local head = character:FindFirstChild("Head")
-						local sp = (enabled and ((B and B.head_dot) or (not B and flags["HeadDot"])) and head) and vp_project(head.Position) or nil
-						if sp then
-							local sz = (flags["headdot_size"] or 4) * 1.6
-							o.head_dot.Size = dim2(0, sz, 0, sz)
-							o.head_dot.Position = dim2(0, sp.X, 0, sp.Y)
-							local c = flags["HeadDot_Color"]; if c and c.Color then o.head_dot.BackgroundColor3 = c.Color end
-							o.head_dot.Visible = true
-						else
-							o.head_dot.Visible = false
-						end
-					end
-
-					-- Skeleton: when the builder is up (B), a cheap tiny box near the centre — no
-					-- per-frame joint projection at all. The real projected rig only runs in the
-					-- non-builder fallback (B == nil).
-					if o.skel_box then
-						local skel_on = enabled and (B and B.skeleton) == true
-						o.skel_box.Visible = skel_on
-						if skel_on then
-							local col = flags["Skeleton_Color"]
-							if col and col.Color then
-								o.skel_box.BackgroundColor3 = col.Color
-								local st = o.skel_box:FindFirstChildOfClass("UIStroke")
-								if st then st.Color = col.Color end
-							end
-						end
-					end
-					-- Skeleton (projected joints -> rotated thin frames)
-					if o.skel_lines then
-						if not B and enabled and flags["Skeleton"] then
-							local col = flags["Skeleton_Color"]; col = (col and col.Color) or rgb(255, 255, 255)
-							local th = flags["skel_thickness"] or 2
-							for i, bone in ipairs(PREVIEW_BONES) do
-								local line = o.skel_lines[i]
-								local a = character:FindFirstChild(bone[1])
-								local b = character:FindFirstChild(bone[2])
-								local pa = a and vp_project(a.Position) or nil
-								local pb = b and vp_project(b.Position) or nil
-								if line and pa and pb then
-									local d = pb - pa
-									line.Size = dim2(0, d.Magnitude, 0, th)
-									line.Position = dim2(0, (pa.X + pb.X) / 2, 0, (pa.Y + pb.Y) / 2)
-									line.Rotation = math.deg(math.atan2(d.Y, d.X))
-									line.BackgroundColor3 = col
-									line.Visible = true
-								elseif line then
-									line.Visible = false
-								end
-							end
-						else
-							for _, line in ipairs(o.skel_lines) do line.Visible = false end
-						end
-					end
-
-					-- Ammo bar fill (static 70% showcase; colours are set in refresh_elements)
-					if o.ammo_fill then o.ammo_fill.Size = dim2(0.7, 0, 1, 0) end
-
-					-- Distance readout: live unit (m / st, follows the esp_dist_unit dropdown) with
-					-- a number tweening 0..100 so it reads as a real distance ticking.
-					if o.distance then
-						local suffix = (flags["esp_dist_unit"] == "Studs") and "st" or "m"
-						local v = math.floor((math.sin(tick() * 0.6) * 0.5 + 0.5) * 100 + 0.5)
-						o.distance.Text = v .. suffix
-					end
-
-					-- Ammo counter under the bar: shown only while Ammo Counter is on; the count
-					-- matches the (static 70%) fill so the number lines up with the bar.
-					if o.ammo_text then
-						local on = flags["Ammo_Counter"] == true
-						o.ammo_text.Visible = on
-						if on then
-							local tc = flags["Ammo_Counter_Color"]
-							if tc and tc.Color then o.ammo_text.TextColor3 = tc.Color end
-							o.ammo_text.Text = "21 / 30"
-						end
-					end
-				end
-
-				library:connection(run.RenderStepped, function(dt)
+				-- always-on spin; resilient to the character being swapped/refreshed
+				library:connection(run.RenderStepped, function()
+					task.wait()
 					if not (character and character.PrimaryPart) then return end
-					if not dragging then
-						-- framerate-independent ease back toward the front view
-						cfg.rotation = cfg.rotation
-							+ (cfg.target_rotation - cfg.rotation) * math.clamp((dt or 1/60) * 8, 0, 1)
-					end
-					character:SetPrimaryPartCFrame(cfr(Vector3.new(0, 0.2, -6)) * angle(0, math.rad(cfg.rotation), 0))
-					update_preview_box()
-					update_preview_overlays()
+					cfg.rotation += 0.5
+					character:SetPrimaryPartCFrame(cfr(Vector3.new(0, 1, -6)) * angle(0, math.rad(cfg.rotation), 0))
 				end)
 			end
 
@@ -3358,130 +2655,6 @@
 						TextSize = 12;
 					});
 				--
-
-				-- ==== ESP-builder preview: the rest of the player-ESP elements ====
-				-- Text tags parent into library.cache; refresh_elements reparents them onto the
-				-- box holder when their flag/selection is on (same pattern as name/kd/vis above).
-
-					-- Edition / rank tag (top-right, above the KD line)
-					objects[ "edition" ] = library:create( "TextLabel" , {
-						FontFace = library.font; Parent = library.cache;
-						TextColor3 = rgb(255, 200, 60); BorderColor3 = rgb(0, 0, 0);
-						Text = "ELITE"; Name = "\0"; TextStrokeTransparency = 0;
-						AnchorPoint = vec2(0, 0); Size = dim2(0, 80, 0, 0);
-						BackgroundTransparency = 1; Position = dim2(1, 6, 0, -14);
-						BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.Y;
-						TextXAlignment = Enum.TextXAlignment.Left; TextSize = 12;
-					});
-
-					-- Status tags (Manip / Reload / Exiting / Combat / Looting) stacked under Vis
-					for i, def in ipairs({
-						{"manip",    "MANIP",     rgb(255, 220, 0)},
-						{"reload",   "RELOAD",    rgb(255, 60, 60)},
-						{"exiting",  "EXITING",   rgb(0, 235, 90)},
-						{"combat",   "[COMBAT]",  rgb(255, 60, 60)},
-						{"looting",  "LOOTING",   rgb(255, 220, 50)},
-						{"resolved", "RESOLVED",  rgb(180, 120, 255)},
-						{"healing",  "HEALING",   rgb(0, 235, 90)},
-						{"stats",    "[ STATS ]", rgb(200, 200, 200)},
-					}) do
-						objects[ def[1] ] = library:create( "TextLabel" , {
-							FontFace = library.font; Parent = library.cache;
-							TextColor3 = def[3]; BorderColor3 = rgb(0, 0, 0);
-							Text = def[2]; Name = "\0"; TextStrokeTransparency = 0;
-							AnchorPoint = vec2(0, 0); Size = dim2(0, 90, 0, 0);
-							BackgroundTransparency = 1; Position = dim2(1, 6, 0, 28 + (i - 1) * 14);
-							BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.Y;
-							TextXAlignment = Enum.TextXAlignment.Left; TextSize = 12;
-						});
-					end
-
-					-- Ammo bar (horizontal, under the box) + its gradient fill
-					objects[ "ammo_bg" ] = library:create( "Frame" , {
-						Parent = library.cache; Name = "\0"; BorderColor3 = rgb(0, 0, 0);
-						BackgroundColor3 = rgb(36, 36, 36); BorderSizePixel = 0;
-						AnchorPoint = vec2(0.5, 0); Position = dim2(0.5, 0, 1, 3); Size = dim2(1, 0, 0, 3);
-					});
-					library:create( "UIStroke" , {
-						Parent = objects[ "ammo_bg" ]; Name = "\0"; Color = rgb(0, 0, 0);
-						LineJoinMode = Enum.LineJoinMode.Miter;
-					});
-					objects[ "ammo_fill" ] = library:create( "Frame" , {
-						Parent = objects[ "ammo_bg" ]; Name = "\0"; BorderColor3 = rgb(0, 0, 0);
-						BackgroundColor3 = rgb(130, 170, 255); BorderSizePixel = 0;
-						Position = dim2(0, 0, 0, 0); Size = dim2(0.7, 0, 1, 0);
-					});
-					objects[ "ammo_grad" ] = library:create( "UIGradient" , {
-						Parent = objects[ "ammo_fill" ]; Name = "\0";
-						Color = ColorSequence.new(rgb(130, 170, 255), rgb(89, 122, 255));
-					});
-					-- Ammo counter: centred under the bar, shown when the Ammo Counter toggle is on
-					objects[ "ammo_text" ] = library:create( "TextLabel" , {
-						Parent = objects[ "ammo_bg" ]; Name = "\0"; Visible = false;
-						FontFace = library.font; TextColor3 = rgb(255, 255, 255); BorderColor3 = rgb(0, 0, 0);
-						Text = "21 / 30"; TextStrokeTransparency = 0;
-						AnchorPoint = vec2(0.5, 0); Size = dim2(1, 0, 0, 0);
-						BackgroundTransparency = 1; Position = dim2(0.5, 0, 1, 2);
-						BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.Y;
-						TextXAlignment = Enum.TextXAlignment.Center; TextSize = 11;
-					});
-
-					-- Head dot (projected onto the head each frame; lives in the viewport)
-					objects[ "head_dot" ] = library:create( "Frame" , {
-						Parent = items.viewportframe; Name = "\0"; Visible = false;
-						BackgroundColor3 = rgb(255, 255, 255); BorderColor3 = rgb(0, 0, 0);
-						BorderSizePixel = 0; AnchorPoint = vec2(0.5, 0.5); Size = dim2(0, 8, 0, 8); ZIndex = 6;
-					});
-					library:create( "UICorner" , { Parent = objects[ "head_dot" ]; Name = "\0"; CornerRadius = dim(1, 0); });
-
-					-- Skeleton line pool (projected joints each frame; rotated thin frames)
-					objects[ "skeleton" ] = library:create( "Frame" , {
-						Parent = items.viewportframe; Name = "\0"; BackgroundTransparency = 1;
-						Position = dim2(0, 0, 0, 0); Size = dim2(1, 0, 1, 0); BorderSizePixel = 0; ZIndex = 5;
-					});
-					objects[ "skel_lines" ] = {}
-					for i = 1, 14 do
-						objects[ "skel_lines" ][i] = library:create( "Frame" , {
-							Parent = objects[ "skeleton" ]; Name = "\0"; Visible = false;
-							BackgroundColor3 = rgb(255, 255, 255); BorderColor3 = rgb(0, 0, 0);
-							BorderSizePixel = 0; AnchorPoint = vec2(0.5, 0.5); Size = dim2(0, 0, 0, 2); ZIndex = 5;
-						});
-					end
-
-					-- Chams (a Highlight on the viewport character; Adornee bound each frame)
-					objects[ "chams" ] = library:create( "Highlight" , {
-						Parent = items.viewportframe; Name = "\0"; Enabled = false;
-						DepthMode = Enum.HighlightDepthMode.AlwaysOnTop;
-						FillTransparency = 1; OutlineTransparency = 0;
-						OutlineColor = rgb(255, 255, 255); FillColor = rgb(255, 255, 255);
-					});
-
-					-- Chams / Skeleton preview STAND-INS (cheap, no per-frame projection): the
-					-- builder represents chams as a smaller box INSIDE the main box, and skeleton
-					-- as a tiny box near the centre (per the reference) instead of a real
-					-- highlight / projected rig. They ride objects.holder so they scale with the
-					-- box, so there's zero per-frame math beyond toggling Visible.
-					objects[ "chams_box" ] = library:create( "Frame" , {
-						Parent = objects[ "holder" ]; Name = "\0"; Visible = false;
-						AnchorPoint = vec2(0.5, 0.5); Position = dim2(0.5, 0, 0.5, 0);
-						Size = dim2(1, -14, 1, -14); BackgroundColor3 = rgb(130, 170, 255);
-						BackgroundTransparency = 0.82; BorderSizePixel = 0; ZIndex = 4;
-					});
-					library:create( "UIStroke" , {
-						Parent = objects[ "chams_box" ]; Name = "\0"; Thickness = 1;
-						Color = rgb(130, 170, 255); LineJoinMode = Enum.LineJoinMode.Miter;
-					});
-					objects[ "skel_box" ] = library:create( "Frame" , {
-						Parent = objects[ "holder" ]; Name = "\0"; Visible = false;
-						AnchorPoint = vec2(0.5, 0.5); Position = dim2(0.5, 0, 0.5, 0);
-						Size = dim2(0, 24, 0, 50); BackgroundColor3 = rgb(255, 255, 255);
-						BackgroundTransparency = 0.65; BorderSizePixel = 0; ZIndex = 5;
-					});
-					library:create( "UIStroke" , {
-						Parent = objects[ "skel_box" ]; Name = "\0"; Thickness = 1;
-						Color = rgb(255, 255, 255); LineJoinMode = Enum.LineJoinMode.Miter;
-					});
-				--
 			end
 
 			cfg.change_health = function()
@@ -3518,14 +2691,13 @@
 					["HP_Text_Color"] = {objects[ "hp_number" ]};
 					["ESP_KD"] = objects[ "kd" ];
 					["ESP_KD_Color"] = {objects[ "kd" ]};
+					["ESP_Vis_Tag"] = objects[ "vis" ];
 				}
 
 				for flag,object in temp do
 					if flags[flag] ~= nil then
 						if type(object) == "table" then
 							object[1].TextColor3 = flags[flag].Color
-						elseif cfg._chip_set and cfg._chip_set[object] then
-							-- builder owns chip placement/visibility; refresh only recolours it
 						else
 							object.Parent = flags[flag] and objects[ "holder" ] or library.cache
 						end
@@ -3534,12 +2706,7 @@
 				
 				local is_corner = flags[ "Box_Type" ] == "Corner"
 
-				-- Box visibility: the ESP builder owns it via cfg._show.box (a global chip);
-				-- fall back to the real Boxes flag when the builder isn't up.
-				local box_on
-				if cfg._show then box_on = cfg._show.box == true else box_on = flags["Boxes"] == true end
-
-				if box_on then
+				if flags["Boxes"] then 
 					if is_corner then 
 						objects[ "corners" ].Parent = objects["holder"]
 						objects[ "box_handler" ].Parent = library.cache
@@ -3559,48 +2726,6 @@
 
 				for _, corner in objects[ "corners" ]:GetChildren() do
 					corner.Frame.BackgroundColor3 = flags["Box_Color"].Color
-				end
-
-				-- Edition tag (gated by ESP_Edition; colour from the Elite picker)
-				if objects["edition"] then
-					-- builder owns placement/visibility; refresh only recolours it
-					local ec = flags["ESP_Edition_Elite"]
-					if ec and ec.Color then objects["edition"].TextColor3 = ec.Color end
-				end
-
-				-- Status tags: driven by the ESP_Status_Sel multiselect, each with its colour
-				do
-					local sel = flags["ESP_Status_Sel"]
-					local set = {}
-					if type(sel) == "table" then for _, v in ipairs(sel) do set[v] = true end
-					elseif type(sel) == "string" then set[sel] = true end
-					local status_map = {
-						{"vis",     "Visible", "ESP_Vis_Color"},
-						{"manip",   "Manip",   "ESP_Manip_Color"},
-						{"reload",  "Reload",  "ESP_Reload_Color"},
-						{"exiting", "Exiting", "ESP_Exit_Color"},
-						{"combat",  "Combat",  "ESP_Combat_Color"},
-						{"looting", "Looting", "ESP_Loot_Color"},
-					}
-					for _, s in ipairs(status_map) do
-						local obj = objects[s[1]]
-						if obj then
-							-- builder owns placement/visibility; refresh only recolours it
-							local c = flags[s[3]]
-							if c and c.Color then obj.TextColor3 = c.Color end
-						end
-					end
-				end
-
-				-- Ammo bar (gated by Ammobar; colours from its pickers)
-				if objects["ammo_bg"] then
-					objects["ammo_bg"].Parent = flags["Ammobar"] and objects["holder"] or library.cache
-					local bg = flags["Ammo_BG_Color"]
-					if bg and bg.Color then objects["ammo_bg"].BackgroundColor3 = bg.Color end
-					local c1, c2 = flags["Ammo_Color_Top"], flags["Ammo_Color_Bottom"]
-					if objects["ammo_grad"] and c1 and c2 and c1.Color and c2.Color then
-						objects["ammo_grad"].Color = ColorSequence.new(c1.Color, c2.Color)
-					end
 				end
 			end
 
@@ -3635,407 +2760,6 @@
 							if old then old:Destroy() end
 						end)
 					end
-				end
-			end)
-
-			-- ── ESP LAYOUT BUILDER (v1) ──────────────────────────────────────────────
-			-- Drag the element chips onto the box's four sides. Each side is a UIListLayout
-			-- stack so order is real — drop a chip between two others to insert it there, and
-			-- top/bottom grow up/down while left/right stack beside the box. The bottom tray
-			-- holds un-placed chips; drop a placed chip back on the tray to remove it. Side +
-			-- insertion pick use Roblox's native hover (drop-zones / chip MouseEnter), so there
-			-- is no inset/absolute-position math. Layout persists in the esp_layout flag. The
-			-- whole thing is pcall-wrapped: a builder hiccup can never abort the menu load.
-			pcall(function()
-				local objects  = cfg.objects
-				local holder   = objects.holder
-				local ACCENT   = (themes and themes.preset and themes.preset.accent) or rgb(225, 55, 110)
-				local TXT      = (themes and themes.preset and themes.preset.text)   or rgb(220, 220, 220)
-
-				-- placeable text elements (real preview objects) + their palette label
-				local CHIPS = {
-					{key = "name",      label = "Name"},
-					{key = "distance",  label = "Distance"},
-					{key = "weapon",    label = "Weapon"},
-					{key = "hp_number", label = "HP"},
-					{key = "kd",        label = "KD"},
-					{key = "edition",   label = "Edition"},
-					{key = "vis",       label = "Visible"},
-					{key = "manip",     label = "Manip"},
-					{key = "reload",    label = "Reload"},
-					{key = "exiting",   label = "Exiting"},
-					{key = "combat",    label = "Combat"},
-					{key = "looting",   label = "Looting"},
-					{key = "resolved",  label = "Resolved"},
-					{key = "healing",   label = "Healing"},
-					{key = "stats",     label = "Stats"},
-					-- global toggle chips: whole-preview visuals, NOT side-anchored. Drag out
-					-- of the tray to turn ON, drag back to the tray to turn OFF.
-					{key = "box",       label = "Box",      global = true},
-					{key = "skeleton",  label = "Skeleton", global = true},
-					{key = "chams",     label = "Chams",    global = true},
-					{key = "head_dot",  label = "Head Dot", global = true},
-				}
-				-- sensible starting layout; the rest (edition + status tags) begin in the palette
-				local DEFAULT_SIDE = {
-					name = "top", distance = "bottom", weapon = "bottom",
-					hp_number = "left", kd = "right",
-				}
-				local SIDES = {"top", "bottom", "left", "right"}
-
-				-- global toggle chips have no side — they just enable/disable a whole-preview
-				-- visual. cfg._show is the live on/off state the preview overlay + refresh read.
-				local GLOBAL_KEYS = {}
-				for _, c in ipairs(CHIPS) do if c.global then GLOBAL_KEYS[c.key] = true end end
-				-- global chip -> the real ESP flag it mirrors, so a fresh builder (no saved
-				-- layout) starts each global ON if its ESP toggle is already on.
-				local GLOBAL_FLAG = { box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot" }
-				cfg._show = {}
-				for k in pairs(GLOBAL_KEYS) do cfg._show[k] = false end
-
-				-- so refresh_elements switches the temp-loop chips (name/distance/weapon/hp/kd)
-				-- to visibility instead of reparenting them out of their side container
-				cfg._chip_set = {}
-				for _, k in ipairs({"name", "distance", "weapon", "hp_number", "kd"}) do
-					if objects[k] then cfg._chip_set[objects[k]] = true end
-				end
-
-				-- 4 side containers, each a UIListLayout stack hugging one edge of the box
-				local containers = {}
-				local function make_side(anchor, pos, halign, valign)
-					local c = library:create("Frame", {
-						Parent = holder; Name = "\0"; BackgroundTransparency = 1; BorderSizePixel = 0;
-						AnchorPoint = anchor; Position = pos; Size = dim2(0, 0, 0, 0);
-						AutomaticSize = Enum.AutomaticSize.XY; ZIndex = 3;
-					})
-					library:create("UIListLayout", {
-						Parent = c; FillDirection = Enum.FillDirection.Vertical;
-						HorizontalAlignment = halign; VerticalAlignment = valign;
-						SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 1);
-					})
-					return c
-				end
-				containers.top    = make_side(vec2(0.5, 1), dim2(0.5, 0, 0, -3), Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Bottom)
-				containers.bottom = make_side(vec2(0.5, 0), dim2(0.5, 0, 1, 3),  Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top)
-				-- left/right hug the box's TOP corners and stack DOWNWARD (NHack-style), so
-				-- side tags read from the top of the side instead of centered on the box.
-				containers.left   = make_side(vec2(1, 0), dim2(0, -5, 0, 0), Enum.HorizontalAlignment.Right,  Enum.VerticalAlignment.Top)
-				containers.right  = make_side(vec2(0, 0), dim2(1, 5, 0, 0),  Enum.HorizontalAlignment.Left,   Enum.VerticalAlignment.Top)
-
-				-- normalize a real element so a UIListLayout can own its position, and give it a
-				-- faint rounded backing used for the hover glow (invisible until hovered)
-				local function normalize(o)
-					o.AnchorPoint = vec2(0, 0)
-					o.Size = dim2(0, 0, 0, 0)
-					o.AutomaticSize = Enum.AutomaticSize.XY
-					o.TextXAlignment = Enum.TextXAlignment.Center
-					o.Active = true
-					o.BackgroundColor3 = ACCENT
-					o.BackgroundTransparency = 1
-					if not o:FindFirstChildOfClass("UICorner") then
-						library:create("UICorner", {Parent = o; CornerRadius = dim(0, 3)})
-					end
-					if not o:FindFirstChildOfClass("UIPadding") then
-						library:create("UIPadding", {Parent = o;
-							PaddingLeft = dim(0, 3); PaddingRight = dim(0, 3)})
-					end
-				end
-
-				-- state
-				local placed = {}   -- key -> side (nil = in palette)
-				local order  = {}   -- key -> layout order within its side
-
-				-- palette tray: a visually SEPARATE box below the preview — its own bordered
-				-- dark panel with a top accent line + label, holding the wrapping row of
-				-- un-placed chips. LayoutOrder 50 stacks it under the viewport(0) in the
-				-- section's vertical layout, so it's obviously distinct from the ESP draw area.
-				local tray_wrap = library:create("Frame", {
-					Parent = self.holder; Name = "\0"; Active = true; LayoutOrder = 50;
-					Size = dim2(1, -8, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
-					BackgroundColor3 = themes.preset.high_contrast; BorderSizePixel = 0; ZIndex = 5;
-				}) library:apply_theme(tray_wrap, "high_contrast", "BackgroundColor3")
-				do
-					local st = library:create("UIStroke", {
-						Parent = tray_wrap; Color = themes.preset.inline; Thickness = 1;
-						LineJoinMode = Enum.LineJoinMode.Miter;
-					}) library:apply_theme(st, "inline", "Color")
-				end
-				library:create("UIListLayout", {
-					Parent = tray_wrap; FillDirection = Enum.FillDirection.Vertical;
-					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
-				})
-				library:create("UIPadding", {
-					Parent = tray_wrap; PaddingTop = dim(0, 5); PaddingBottom = dim(0, 7);
-					PaddingLeft = dim(0, 6); PaddingRight = dim(0, 6);
-				})
-				local tray_accent = library:create("Frame", {
-					Parent = tray_wrap; Name = "\0"; LayoutOrder = 0;
-					Size = dim2(1, 0, 0, 2); BackgroundColor3 = themes.preset.accent;
-					BorderSizePixel = 0; ZIndex = 6;
-				}) library:apply_theme(tray_accent, "accent", "BackgroundColor3")
-				local tray_label = library:create("TextLabel", {
-					Parent = tray_wrap; Name = "\0"; LayoutOrder = 1; FontFace = library.font;
-					Text = "UNPLACED  \u{2014}  drag onto the box"; TextSize = 12; TextColor3 = themes.preset.text;
-					BackgroundTransparency = 1; BorderSizePixel = 0; Size = dim2(1, 0, 0, 12);
-					TextXAlignment = Enum.TextXAlignment.Left;
-				}) library:apply_theme(tray_label, "text", "TextColor3")
-				local tray = library:create("Frame", {
-					Parent = tray_wrap; Name = "\0"; LayoutOrder = 2; Active = true;
-					Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
-					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 5;
-				})
-				local tray_layout = library:create("UIListLayout", {
-					Parent = tray; FillDirection = Enum.FillDirection.Horizontal;
-					HorizontalAlignment = Enum.HorizontalAlignment.Left;
-					VerticalAlignment = Enum.VerticalAlignment.Top;
-					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 6);
-				})
-				pcall(function() tray_layout.Wraps = true end)   -- newer prop; skip on old builds
-				local palette_chips = {}
-
-				-- drag state, driven entirely by native hover (no absolute/inset math)
-				local dragging, hover_side, hover_before, hover_palette = nil, nil, nil, false
-
-				-- MAIN vs AI tab: the same chips/preview edit two independent layouts, saved to
-				-- esp_layout (players) and esp_layout_ai (AI). The tab bar (built below) flips it.
-				local layout_ctx = "player"
-				local function lflag() return layout_ctx == "ai" and "esp_layout_ai" or "esp_layout" end
-
-				local function relayout(side)
-					local list = {}
-					for k, s in pairs(placed) do if s == side then list[#list + 1] = k end end
-					table.sort(list, function(a, b) return (order[a] or 0) < (order[b] or 0) end)
-					for i, k in ipairs(list) do order[k] = i; objects[k].LayoutOrder = i end
-				end
-
-				local function save_layout()
-					local parts = {}
-					for _, c in ipairs(CHIPS) do
-						local s = placed[c.key]
-						if s then parts[#parts + 1] = c.key .. ":" .. s .. ":" .. (order[c.key] or 1) end
-					end
-					flags[lflag()] = table.concat(parts, ",")   -- into the active tab's flag
-				end
-
-				local function refresh_palette()
-					for _, c in ipairs(CHIPS) do
-						local chip = palette_chips[c.key]
-						if chip then chip.Visible = placed[c.key] == nil end
-					end
-				end
-
-				local function place(key, side, before_key)
-					if GLOBAL_KEYS[key] then
-						placed[key] = "on"; cfg._show[key] = true
-						refresh_palette(); save_layout()
-						if key == "box" and cfg.refresh_elements then pcall(cfg.refresh_elements) end
-						return
-					end
-					objects[key].Parent = containers[side]
-					placed[key] = side
-					if before_key and placed[before_key] == side then
-						order[key] = (order[before_key] or 1) - 0.5   -- land just before it
-					else
-						local mx = 0
-						for k, s in pairs(placed) do if s == side and k ~= key then mx = math.max(mx, order[k] or 0) end end
-						order[key] = mx + 1
-					end
-					relayout(side)
-					refresh_palette()
-					save_layout()
-					-- little pop for drop feedback (doesn't fight the layout)
-					objects[key].BackgroundTransparency = 0.6
-					tween_service:Create(objects[key], TweenInfo.new(0.25, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
-				end
-
-				local function unplace(key)
-					if GLOBAL_KEYS[key] then
-						placed[key] = nil; cfg._show[key] = false
-						refresh_palette(); save_layout()
-						if key == "box" and cfg.refresh_elements then pcall(cfg.refresh_elements) end
-						return
-					end
-					local side = placed[key]
-					objects[key].Parent = library.cache
-					placed[key] = nil; order[key] = nil
-					if side then relayout(side) end
-					refresh_palette()
-					save_layout()
-				end
-
-				local function add_hover(o)
-					library:connection(o.MouseEnter, function()
-						if dragging then return end
-						tween_service:Create(o, TweenInfo.new(0.12), {BackgroundTransparency = 0.75}):Play()
-					end)
-					library:connection(o.MouseLeave, function()
-						tween_service:Create(o, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
-					end)
-				end
-
-				local function bind_drag(src, key)
-					library:connection(src.InputBegan, function(input)
-						if input.UserInputType == Enum.UserInputType.MouseButton1
-							or input.UserInputType == Enum.UserInputType.Touch then
-							dragging = key; hover_side = nil; hover_before = nil; hover_palette = false
-						end
-					end)
-				end
-
-				-- side drop zones: invisible frames that report which side the cursor is over
-				local function make_zone(anchor, pos, size, side)
-					local z = library:create("Frame", {
-						Parent = holder; Name = "\0"; BackgroundTransparency = 1; Active = true;
-						AnchorPoint = anchor; Position = pos; Size = size; BorderSizePixel = 0; ZIndex = 2;
-					})
-					library:connection(z.MouseEnter, function() if dragging then hover_side = side; hover_before = nil end end)
-					library:connection(z.MouseLeave, function() if dragging and hover_side == side then hover_side = nil end end)
-				end
-				make_zone(vec2(0.5, 1), dim2(0.5, 0, 0, 0), dim2(2, 24, 0, 55), "top")
-				make_zone(vec2(0.5, 0), dim2(0.5, 0, 1, 0), dim2(2, 24, 0, 55), "bottom")
-				make_zone(vec2(1, 0.5), dim2(0, 0, 0.5, 0), dim2(0, 55, 2, 24), "left")
-				make_zone(vec2(0, 0.5), dim2(1, 0, 0.5, 0), dim2(0, 55, 2, 24), "right")
-
-				-- tray box = drop-to-remove zone (the whole bordered panel, not just the chips)
-				library:connection(tray_wrap.MouseEnter, function() if dragging then hover_palette = true end end)
-				library:connection(tray_wrap.MouseLeave, function() hover_palette = false end)
-
-				-- global release commits the drag
-				library:connection(uis.InputEnded, function(input)
-					if not dragging then return end
-					if input.UserInputType ~= Enum.UserInputType.MouseButton1
-						and input.UserInputType ~= Enum.UserInputType.Touch then return end
-					local key = dragging; dragging = nil
-					if hover_palette then unplace(key)
-					elseif GLOBAL_KEYS[key] then place(key)   -- globals: any non-tray drop turns it ON
-					elseif hover_side then place(key, hover_side, hover_before) end
-					hover_side = nil; hover_before = nil; hover_palette = false
-				end)
-
-				-- wire each real element as a drag source + build its palette chip
-				for _, c in ipairs(CHIPS) do
-					local o = objects[c.key]
-					-- side chips wire the real preview element as a drag source too. Global
-					-- chips (box/skeleton/chams/head_dot) have no draggable side element —
-					-- chams is a Highlight, box is many frames — so only the tray chip drives
-					-- them, and the preview reads cfg._show for their on/off state.
-					if o and not GLOBAL_KEYS[c.key] then
-						normalize(o)
-						add_hover(o)
-						bind_drag(o, c.key)
-						-- during a drag, hovering a placed chip = insert before it
-						library:connection(o.MouseEnter, function()
-							if dragging and dragging ~= c.key and placed[c.key] then
-								hover_side = placed[c.key]; hover_before = c.key
-							end
-						end)
-					end
-
-					-- every element gets a tray chip (the drag source)
-					local chip = library:create("TextLabel", {
-						Parent = tray; Name = "\0"; Active = true; FontFace = library.font;
-						Text = c.label; TextColor3 = TXT; BackgroundColor3 = ACCENT;
-						BackgroundTransparency = 1; BorderSizePixel = 0;
-						AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 14); TextSize = 12; ZIndex = 6;
-					})
-					library:create("UICorner", {Parent = chip; CornerRadius = dim(0, 3)})
-					library:create("UIPadding", {Parent = chip; PaddingLeft = dim(0, 4); PaddingRight = dim(0, 4)})
-					palette_chips[c.key] = chip
-					add_hover(chip)
-					bind_drag(chip, c.key)
-				end
-
-				-- initial placement: from the esp_layout flag, else the defaults
-				local function apply_from_string(str)
-					for _, c in ipairs(CHIPS) do
-						if placed[c.key] then
-							if GLOBAL_KEYS[c.key] then cfg._show[c.key] = false
-							else objects[c.key].Parent = library.cache end
-							placed[c.key] = nil; order[c.key] = nil
-						end
-					end
-					local any = false
-					for entry in tostring(str or ""):gmatch("[^,]+") do
-						local k, s, ord = entry:match("^([%w_]+):(%w+):([%d%.]+)$")
-						if k and s and GLOBAL_KEYS[k] then
-							placed[k] = "on"; cfg._show[k] = true; any = true   -- side ignored for globals
-						elseif k and s and objects[k] and containers[s] then
-							objects[k].Parent = containers[s]; placed[k] = s; order[k] = tonumber(ord) or 1; any = true
-						end
-					end
-					if not any and str == nil then   -- only default when the tab was never set (nil, not "")
-						for _, c in ipairs(CHIPS) do
-							local side = DEFAULT_SIDE[c.key]
-							if side and objects[c.key] then objects[c.key].Parent = containers[side]; placed[c.key] = side end
-						end
-					end
-					for _, s in ipairs(SIDES) do relayout(s) end
-					refresh_palette()
-					-- reflect box on/off (its show/hide lives in refresh_elements, not the overlay)
-					if cfg.refresh_elements then pcall(cfg.refresh_elements) end
-				end
-				-- MAIN / AI tab row: a real tab bar ABOVE the preview, in the panel body —
-				-- NOT floating over the viewport/character. The section holder is a vertical
-				-- UIListLayout, so LayoutOrder decides the stack: tabs(-1) -> preview(0) ->
-				-- tray(50). Switches which layout the chips edit; AI writes esp_layout_ai.
-				items.viewportframe.LayoutOrder = 0
-				local tabbar = library:create("Frame", {
-					Parent = self.holder; Name = "\0"; LayoutOrder = -1;
-					Size = dim2(1, -8, 0, 16);
-					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 7;
-				})
-				library:create("UIListLayout", {
-					Parent = tabbar; FillDirection = Enum.FillDirection.Horizontal;
-					HorizontalAlignment = Enum.HorizontalAlignment.Left;
-					VerticalAlignment = Enum.VerticalAlignment.Center;
-					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
-				})
-				local tab_btns = {}
-				local function make_tab(id, label, ord)
-					local b = library:create("TextButton", {
-						Parent = tabbar; Name = "\0"; Active = true; AutoButtonColor = false;
-						FontFace = library.font; Text = label; TextSize = 12; LayoutOrder = ord;
-						TextColor3 = themes.preset.text; BackgroundTransparency = 1;   -- no glow; text-only
-						BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 1, 0); ZIndex = 7;
-					})
-					library:create("UIPadding", {Parent = b; PaddingLeft = dim(0, 5); PaddingRight = dim(0, 5)})
-					tab_btns[id] = b
-					return b
-				end
-
-				local function set_context(ctx)
-					if ctx == layout_ctx then return end
-					save_layout()                       -- persist the tab we're leaving
-					layout_ctx = ctx
-					apply_from_string(flags[lflag()])   -- load the tab we're entering
-					save_layout()
-					for k, b in pairs(tab_btns) do
-						-- no background glow: only the TEXT colour changes (accent = selected),
-						-- read live so it follows the current theme (accent/text), not a stale blue
-						b.TextColor3 = (k == ctx) and themes.preset.accent or themes.preset.text
-					end
-				end
-
-				make_tab("player", "MAIN", 1).MouseButton1Click:Connect(function() set_context("player") end)
-				make_tab("ai",     "AI",   2).MouseButton1Click:Connect(function() set_context("ai") end)
-
-				-- initial: MAIN tab, from esp_layout (else defaults)
-				apply_from_string(flags[lflag()])
-				save_layout()
-				tab_btns.player.TextColor3 = themes.preset.accent
-
-				-- config load re-applies whichever layout is showing (both tabs get a setter)
-				if library.config_flags then
-					local function setter(fl)
-						return function(v)
-							pcall(function()
-								flags[fl] = tostring(v or "")
-								if lflag() == fl then apply_from_string(flags[fl]) end
-							end)
-						end
-					end
-					library.config_flags["esp_layout"]    = setter("esp_layout")
-					library.config_flags["esp_layout_ai"] = setter("esp_layout_ai")
 				end
 			end)
 
@@ -4259,11 +2983,7 @@
 			-- 
 
 			-- section instances 
-				-- ScrollingFrame (not a plain Frame): sections content-size and stack now, so a
-				-- tall lane would overflow the fixed window and float its elements off the UI.
-				-- The whole page scrolls vertically instead — AutomaticCanvasSize grows to the
-				-- tallest lane, and the ScrollingFrame clips + scrolls anything past the window.
-				local section_holder = library:create("ScrollingFrame", {
+				local section_holder = library:create("Frame", {
 					Parent = library.section_holder,
 					BackgroundTransparency = 1,
 					Name = "\0",
@@ -4271,17 +2991,8 @@
 					Size = dim2(1, 0, 1, 0),
 					BorderSizePixel = 0,
 					Visible = false,
-					Active = true,
-					ScrollingDirection = Enum.ScrollingDirection.Y,
-					AutomaticCanvasSize = Enum.AutomaticSize.Y,
-					CanvasSize = dim2(0, 0, 0, 0),
-					ScrollBarThickness = 2,
-					ScrollBarImageColor3 = themes.preset.accent,
-					MidImage = "rbxassetid://103468666327206",
-					TopImage = "rbxassetid://103468666327206",
-					BottomImage = "rbxassetid://103468666327206",
 					BackgroundColor3 = rgb(255, 255, 255)
-				}) library:apply_theme(section_holder, "accent", "ScrollBarImageColor3")
+				})
 			
 				cfg["holder"] = section_holder
 
@@ -4315,9 +3026,9 @@
 				button:FindFirstChildOfClass("UIGradient").Rotation = -90
 				button:FindFirstChildOfClass("TextLabel").TextColor3 = themes.preset.accent 
 
-				library.current_tab[2].Visible = true
+				library.current_tab[2].Visible = true 
 
-				if library.current_element_open and library.current_element_open ~= cfg then
+				if library.current_element_open and library.current_element_open ~= cfg then 
 					library.current_element_open.set_visible(false)
 					library.current_element_open.open = false 
 					library.current_element_open = nil 
@@ -4337,53 +3048,26 @@
 			
 			local holder = path or self.holder
 			
-			-- content-sized lane: Size Y is driven by the stacked sections (AutomaticSize.Y),
-			-- so the parent section_holder ScrollingFrame can measure the tallest lane and
-			-- scroll the whole page. A fixed scale-1 height here would pin every lane to the
-			-- window and defeat both the page scroll and the content-sizing.
 			local column = library:create("Frame", {
 				Parent = holder,
 				BackgroundTransparency = 1,
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, 0, 1, 0),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
-			}) library:apply_theme(column, "inline", "BackgroundColor3")
+			}) library:apply_theme(column, "inline", "BackgroundColor3") 
 			
-			-- sections size to their own content (AutomaticSize.Y) and stack from the top,
-			-- so a short lane leaves empty space at the BOTTOM instead of flex-stretching its
-			-- sections to fill the column (which left the gap inside a lone short section).
 			library:create("UIListLayout", {
 				Parent = column,
 				Padding = dim(0, 4),
-				SortOrder = Enum.SortOrder.LayoutOrder
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				VerticalFlex = Enum.UIFlexAlignment.Fill
 			})
 			
 			cfg["holder"] = column
 
-			-- Lane-aware minimum width. Columns are the page's vertical "lanes"; the tab's
-			-- section_holder splits them evenly (HorizontalFlex = Fill). Two lanes fit the
-			-- stock 604px window, but a page built with 3+ lanes needs a wider window or the
-			-- extra lane squeezes elements into clipping. We count lanes per tab (self is the
-			-- tab), and once a tab passes 2 lanes we raise the main window's resize floor and,
-			-- if it's currently narrower, grow it to fit. Each lane past 2 adds 122px, matching
-			-- the comfortable ~726px 3-lane spacing. Panels/tabs with 1-2 lanes are untouched.
-			self._lane_count = (self._lane_count or 0) + 1
-			if self._lane_count >= 3 and library._main_holder then
-				local mh = library._main_holder
-				local want = 604 + (self._lane_count - 2) * 122
-				library.min_widths = library.min_widths or {}
-				if (library.min_widths[mh] or 0) < want then
-					library.min_widths[mh] = want
-				end
-				if mh.Size.X.Offset < want then
-					mh.Size = dim2(mh.Size.X.Scale, want, mh.Size.Y.Scale, mh.Size.Y.Offset)
-				end
-			end
-
-			return setmetatable(cfg, library)
+			return setmetatable(cfg, library) 
 		end
 
 		function library:multi_section(options)
@@ -4396,33 +3080,28 @@
 				Parent = self.holder,
 				Name = "",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, 0, 1, 0),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
 			}) library:apply_theme(section, "inline", "BackgroundColor3")
-			library:create("UIPadding", {Parent = section, PaddingBottom = dim(0, 1)})
-
+			
 			local inline = library:create("Frame", {
 				Parent = section,
 				Name = "",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, -2, 1, -2),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.outline
-			}) library:apply_theme(inline, "outline", "BackgroundColor3")
-			library:create("UIPadding", {Parent = inline, PaddingBottom = dim(0, 1)})
-
+			}) library:apply_theme(inline, "outline", "BackgroundColor3") 
+			
 			local __background = library:create("Frame", {
 				Parent = inline,
 				Name = "",
 				ClipsDescendants = true,
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, -2, 1, -2),
 				BorderSizePixel = 0,
 				ZIndex = 1,
 				BackgroundColor3 = rgb(255, 255, 255)
@@ -4545,9 +3224,8 @@
 						BottomImage = "rbxassetid://103468666327206",
 						AutomaticCanvasSize = Enum.AutomaticSize.Y,
 						ScrollBarThickness = 2,
-						Size = dim2(1, 0, 0, 0),
-						AutomaticSize = Enum.AutomaticSize.Y,
-						Visible = false,
+						Size = dim2(1, 0, 1, -20),
+						Visible = false, 
 						BackgroundTransparency = 1,
 						Position = dim2(0, 0, 0, 24),
 						BackgroundColor3 = rgb(255, 255, 255),
@@ -4562,10 +3240,8 @@
 						Name = "",
 						BorderColor3 = rgb(0, 0, 0),
 						Size = dim2(1, 0, 0, 0),
-						AutomaticSize = Enum.AutomaticSize.Y,
 						BorderSizePixel = 0,
-						BackgroundColor3 = rgb(255, 255, 255),
-						BackgroundTransparency = 1
+						BackgroundColor3 = rgb(255, 255, 255)
 					}) multi.holder = elements
 					
 					local UIListLayout = library:create("UIListLayout", {
@@ -4579,7 +3255,7 @@
 					local UIPadding = library:create("UIPadding", {
 						Parent = ScrollingFrame,
 						Name = "",
-						PaddingBottom = dim(0, 10)
+						PaddingBottom = dim(0, 60)
 					})
 				--
 				
@@ -4622,32 +3298,27 @@
 				Parent = self.holder,
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, 0, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, 0, 1, 0),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.inline
-			}) library:apply_theme(section, "inline", "BackgroundColor3")
-			library:create("UIPadding", {Parent = section, PaddingBottom = dim(0, 1)})
+			}) library:apply_theme(section, "inline", "BackgroundColor3") 
 
 			local inline = library:create("Frame", {
 				Parent = section,
 				Name = "\0",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, -2, 1, -2),
 				BorderSizePixel = 0,
 				BackgroundColor3 = themes.preset.outline
-			}) library:apply_theme(inline, "outline", "BackgroundColor3")
-			library:create("UIPadding", {Parent = inline, PaddingBottom = dim(0, 1)})
+			}) library:apply_theme(inline, "outline", "BackgroundColor3") 
 
 			local background = library:create("Frame", {
 				Parent = inline,
 				Name = "\0",
 				Position = dim2(0, 1, 0, 1),
 				BorderColor3 = rgb(0, 0, 0),
-				Size = dim2(1, -2, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, -2, 1, -2),
 				BorderSizePixel = 0,
 				BackgroundColor3 = rgb(255, 255, 255)
 			})
@@ -4708,15 +3379,14 @@
 				MidImage = "rbxassetid://103468666327206",
 				TopImage = "rbxassetid://103468666327206",
 				BottomImage = "rbxassetid://103468666327206",
-				Size = dim2(1, 0, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
+				Size = dim2(1, 0, 1, -20),
 				BackgroundTransparency = 1,
 				Position = dim2(0, 0, 0, 20),
 				BackgroundColor3 = rgb(255, 255, 255),
 				BorderColor3 = rgb(0, 0, 0),
 				BorderSizePixel = 0,
 				CanvasSize = dim2(0, 0, 0, 0)
-			}) library:apply_theme(ScrollingFrame, "accent", "ScrollBarImageColor3")
+			}) library:apply_theme(ScrollingFrame, "accent", "ScrollBarImageColor3") 
 
 			ScrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
 				if library.current_element_open then 
@@ -4731,12 +3401,10 @@
 				Name = "\0",
 				BorderColor3 = rgb(0, 0, 0),
 				Size = dim2(1, 0, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
 				BorderSizePixel = 0,
-				BackgroundColor3 = rgb(255, 255, 255),
-				BackgroundTransparency = 1
+				BackgroundColor3 = rgb(255, 255, 255)
 			})
-			cfg.holder = elements
+			cfg.holder = elements 
 
 			library:create("UIListLayout", {
 				Parent = elements,
@@ -5289,77 +3957,6 @@
 			return setmetatable(cfg, library)
 		end
 
-		-- library:subgroup — inline replacement for :plus. Instead of a floating "+" popup,
-		-- the sub-options render indented directly UNDER the driving element (reusing the
-		-- indent_group guide-rail look), and their visibility follows the driver's state:
-		-- a toggle reveals them while ON, a dropdown while it has a selection. Same chaining
-		-- API as :plus — :toggle/:slider/:dropdown/... parent INTO cfg.holder:
-		--   someToggle:subgroup({name = "Options"})
-		--       :slider({name = "Volume", flag = "opt_vol", min = 0, max = 10})
-		-- (options.name/max_height/width/height are accepted for drop-in compatibility with
-		-- :plus but only the inline look is drawn — height is automatic.)
-		function library:subgroup(options)
-			options = options or {}
-			local cfg = { open = false }
-			-- the driver (toggle/dropdown) exposes parent_holder = its section holder, so the
-			-- group lands right below it in creation order. Fall back to self.holder so a bare
-			-- :subgroup still parents somewhere sane.
-			local parent_holder = self.parent_holder or self.holder
-
-			local wrap = library:create("Frame", {
-				Parent = parent_holder,
-				Name = "",
-				Size = dim2(1, -8, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
-				BorderSizePixel = 0,
-				BackgroundTransparency = 1,
-				Visible = false,   -- hidden until the driver turns it on (UIListLayout skips it)
-				BackgroundColor3 = rgb(255, 255, 255)
-			})
-
-			local rail = library:create("Frame", {
-				Parent = wrap,
-				Name = "",
-				Position = dim2(0, 5, 0, 0),
-				Size = dim2(0, 1, 1, -6),
-				BorderSizePixel = 0,
-				BackgroundColor3 = themes.preset.inline
-			}) library:apply_theme(rail, "inline", "BackgroundColor3")
-
-			local elements = library:create("Frame", {
-				Parent = wrap,
-				Name = "",
-				Position = dim2(0, 14, 0, 0),
-				Size = dim2(1, -14, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
-				BorderSizePixel = 0,
-				BackgroundTransparency = 1,
-				BackgroundColor3 = rgb(255, 255, 255)
-			})
-
-			library:create("UIListLayout", {
-				Parent = elements,
-				Padding = dim(0, 4),
-				HorizontalAlignment = Enum.HorizontalAlignment.Center,
-				SortOrder = Enum.SortOrder.LayoutOrder
-			})
-
-			cfg.holder = elements
-			cfg.current_holder = elements
-			cfg.wrap = wrap
-
-			function cfg.set_open(bool)
-				cfg.open = bool and true or false
-				wrap.Visible = cfg.open
-			end
-
-			-- bind to the driver's on/off (toggle) or selection (dropdown) state so it
-			-- reveals/hides automatically. attach_subgroup also sets the initial state.
-			if self.attach_subgroup then self.attach_subgroup(cfg) end
-
-			return setmetatable(cfg, library)
-		end
-
 		function library:slider(options)
 			local cfg = {
 				name = options.name or nil,
@@ -5641,11 +4238,7 @@
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
 				cfg["right_holder"] = right_components
-				-- section holder + inline-subgroup registry (see library:subgroup): a subgroup
-				-- chained off this toggle parents into parent_holder and reveals while ON.
-				cfg.parent_holder = self.holder
-				cfg.subgroups = {}
-
+			
 				local list = library:create("UIListLayout", {
 					Parent = right_components,
 					VerticalAlignment = Enum.VerticalAlignment.Center,
@@ -5773,37 +4366,13 @@
 			function cfg.set(bool)
 				library:tween(accent, {BackgroundTransparency = bool and 0 or 1})
 				flags[cfg.flag] = bool
-				-- keep the click-state tracker in sync. Without this, a config/autoload that
-				-- sets a toggle via cfg.set leaves cfg.enabled stale, so the NEXT click computes
-				-- `not <stale>` and eats/inverts itself — the "toggle stuck at wrong state after
-				-- rejoin" bug. Now set() is the single source of truth whoever calls it.
-				cfg.enabled = bool
-
-				-- reveal/hide any inline subgroups chained off this toggle
-				if cfg.subgroups then
-					for _, sub in ipairs(cfg.subgroups) do sub.set_open(bool) end
-				end
-
+				
 				cfg.callback(bool)
 			end
 
-			-- register an inline subgroup so it opens with this toggle (initial state
-			-- from the live flag, since the default was already applied above)
-			function cfg.attach_subgroup(sub)
-				insert(cfg.subgroups, sub)
-				sub.set_open(flags[cfg.flag] and true or false)
-			end
-
 			function cfg.set_element_visible(bool)
-				toggle_holder.Visible = bool
-				-- hiding the toggle hides its inline subgroups; showing it restores them
-				-- to the toggle's live on/off state (not force-open)
-				if cfg.subgroups then
-					for _, sub in ipairs(cfg.subgroups) do
-						sub.set_open(bool and (flags[cfg.flag] and true or false))
-					end
-				end
-			end
+				toggle_holder.Visible = bool 
+			end 
 		
 			library:connection(toggle_holder.MouseButton1Click, function()
 				library:ui_sound("click")
@@ -6054,14 +4623,12 @@
 			local parent = self.right_holder
 			
 			local cfg = {
-				name = options.name or "Color",
+				name = options.name or "Color", 
 				flag = options.flag or tostring(2^789),
 				color = options.color or color(1, 1, 1), -- Default to white color if not provided
 				alpha = options.alpha or 1,
 				callback = options.callback or function() end,
 				right_holder = self.right_holder,
-				tooltip = options.tooltip or nil,
-				use_accent = options.use_accent or false,   -- adds a "Use Accent" toggle to the popup
 			}
 
 			local dragging_sat = false 
@@ -6097,7 +4664,7 @@
 				local handler = library:create("Frame", {
 					Parent = inline,
 					Name = "handler",
-					ZIndex = 3;   -- sits above the alpha checker created just below
+					ZIndex = 2;
 					Position = dim2(0, 1, 0, 1),
 					BorderColor3 = rgb(0, 0, 0),
 					Size = dim2(1, -2, 1, -2),
@@ -6105,28 +4672,8 @@
 					BackgroundColor3 = rgb(250, 165, 27)
 				})
 
-				-- alpha checker behind the row swatch. Declared after `handler` but drawn
-				-- under it via ZIndex, so the swatch (painted at the picked alpha in cfg.set)
-				-- shows the board through it. Without this a colour at 20% and the same
-				-- colour at 100% looked identical in the menu.
-				library:create("ImageLabel", {
-					Parent = inline,
-					Name = "",
-					ZIndex = 2,
-					ScaleType = Enum.ScaleType.Tile,
-					TileSize = dim2(0, 10, 0, 10),
-					Image = library:image("transparency.png", "rbxassetid://18274452449"),
-					Position = dim2(0, 1, 0, 1),
-					Size = dim2(1, -2, 1, -2),
-					BackgroundTransparency = 1,
-					BorderSizePixel = 0,
-					BorderColor3 = rgb(0, 0, 0),
-					BackgroundColor3 = rgb(255, 255, 255)
-				})
-
 				library:hoverify(colorpicker_button, colorpicker_button)
-				if cfg.tooltip then library:tool_tip({name = cfg.tooltip, path = colorpicker_button}) end
-
+			
 				local UIGradient = library:create("UIGradient", {
 					Parent = handler,
 					Rotation = 90,
@@ -6138,15 +4685,12 @@
 			-- 
 
 			-- colorpicker instances
-				-- Use Accent adds one extra toggle row at the bottom, so the popup grows 18px
-				-- and main_holder reserves 18px more below (see its Size). Plain pickers are 210.
-				local popup_h = cfg.use_accent and 228 or 210
 				local colorpicker_holder = library:create("Frame", {
 					Parent = sgui,
 					Name = "colorpicker",
 					Position = dim2(0, colorpicker_button.AbsolutePosition.X + 1, 0, colorpicker_button.AbsolutePosition.Y + 17),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(0, 190, 0, popup_h),
+					Size = dim2(0, 190, 0, 210),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline,
 					Visible = false,
@@ -6218,10 +4762,10 @@
 					Name = "main_holder",
 					Position = dim2(0, 0, 0, 20),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(1, 0, 1, cfg.use_accent and -58 or -40),
+					Size = dim2(1, 0, 1, -40),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.inline
-				}) library:apply_theme(main_holder, "inline", "BackgroundColor3")
+				}) library:apply_theme(main_holder, "inline", "BackgroundColor3") 
 				
 				cfg.holder = library:create( "Frame" , {
 					Parent = colorpicker_holder;
@@ -6233,33 +4777,6 @@
 				});
 				
 				local RainbowToggle = setmetatable(cfg, library):toggle({name = "Rainbow", flag = cfg.flag .. "_RAINBOW_FLAG"})
-
-				-- Use Accent (opt-in): its own row above Rainbow. While on, the picker locks to
-				-- the theme accent and follows accent/theme changes — registered into the shared
-				-- per-frame driver (created by the Rainbow block below) with a changed-check so
-				-- it only re-sets when the accent actually moves. Off leaves the last colour.
-				if cfg.use_accent then
-					cfg.holder = library:create("Frame", {
-						Parent = colorpicker_holder;
-						Name = "\0";
-						Position = dim2(0, 6, 1, -37);
-						BorderColor3 = rgb(0, 0, 0);
-						Size = dim2(1, -120, 0, 0);
-						BorderSizePixel = 0;
-					})
-					local accent_flag = cfg.flag .. "_ACCENT_FLAG"
-					setmetatable(cfg, library):toggle({name = "Use Accent", flag = accent_flag})
-					library._rainbow_pickers = library._rainbow_pickers or {}
-					local last_ac
-					insert(library._rainbow_pickers, function()
-						if flags[accent_flag] then
-							local ac = themes.preset.accent
-							if ac ~= last_ac then last_ac = ac; cfg.set(ac, a) end
-						else
-							last_ac = nil
-						end
-					end)
-				end
 
 				cfg.holder = library:create( "Frame" , {
 					Parent = colorpicker_holder;
@@ -6273,30 +4790,13 @@
 				
 				local section = setmetatable(cfg, library)
 				section:button_holder({})
-				-- Copy/Paste move the COLOUR only — they must not touch this picker's Rainbow
-				-- toggle (the old code set library.is_rainbow to a truthy flag-name on Copy and
-				-- had Paste force Rainbow on, which is why copying "turned rainbow on"). We snapshot
-				-- the value (not the live flag table, so a later source change can't mutate it) and
-				-- also mirror it to the system clipboard as a #hex, so a colour can be pasted into
-				-- another picker or pulled from an external hex.
 				section:button({name = "Copy", callback = function()
-					local c = flags[cfg.flag]
-					if c then
-						library.copied_flag = {Color = c.Color, Transparency = c.Transparency}
-						if setclipboard then pcall(setclipboard, "#" .. c.Color:ToHex()) end
-					end
+					library.copied_flag = flags[cfg.flag]
+					library.is_rainbow = cfg.flag .. "_RAINBOW_FLAG"
 				end})
 				section:button({name = "Paste", callback = function()
-					local c = library.copied_flag
-					-- fall back to a #hex on the clipboard if nothing was copied in-menu yet
-					if not c and getclipboard then
-						local ok, txt = pcall(getclipboard)
-						if ok and type(txt) == "string" then
-							local hx = txt:match("#?(%x%x%x%x%x%x)")
-							if hx then local okc, col = pcall(hex, "#" .. hx); if okc then c = {Color = col, Transparency = 0} end end
-						end
-					end
-					if c then cfg.set(c.Color, c.Transparency) end
+					RainbowToggle.set(library.is_rainbow)
+					cfg.set(library.copied_flag.Color, library.copied_flag.Transparency)
 				end})
 
 				local main_holder_inline = library:create("Frame", {
@@ -6375,14 +4875,11 @@
 					Parent = alpha_drag,
 					ScaleType = Enum.ScaleType.Tile,
 					BorderColor3 = rgb(0, 0, 0),
-					Image = library:image("transparency.png", "rbxassetid://18274452449"),
+					Image = "rbxassetid://18274452449",
 					BackgroundTransparency = 1,
 					Name = "alphaind",
 					Size = dim2(1, 0, 1, 0),
-					-- transparency.png is a 10x10 checker (two 5px squares), so tiling at
-					-- its native 10px keeps the pattern pixel-exact. The old 6px tile
-					-- resampled a 10px source and came out soft.
-					TileSize = dim2(0, 10, 0, 10),
+					TileSize = dim2(0, 6, 0, 6),
 					BorderSizePixel = 0,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
@@ -6481,24 +4978,6 @@
 					BackgroundColor3 = themes.preset.outline
 				}) library:apply_theme(outline, "outline", "BackgroundColor3") 
 				
-				-- checker UNDER the preview swatch: the swatch itself is drawn at the
-				-- picked alpha, so a half-transparent colour shows the board through it
-				-- and you can actually see what the alpha is doing without dragging.
-				library:create("ImageLabel", {
-					Parent = outline,
-					Name = "",
-					ScaleType = Enum.ScaleType.Tile,
-					TileSize = dim2(0, 10, 0, 10),
-					Image = library:image("transparency.png", "rbxassetid://18274452449"),
-					Position = dim2(0, 1, 0, 1),
-					Size = dim2(1, -2, 1, -2),
-					BackgroundTransparency = 1,
-					BorderSizePixel = 0,
-					ZIndex = 1,
-					BorderColor3 = rgb(0, 0, 0),
-					BackgroundColor3 = rgb(255, 255, 255)
-				})
-
 				local visualize = library:create("Frame", {
 					Parent = outline,
 					Size = dim2(1, -2, 1, -2),
@@ -6507,7 +4986,6 @@
 					BorderColor3 = rgb(0, 0, 0),
 					Position = dim2(0, 1, 0, 1),
 					BorderSizePixel = 0,
-					ZIndex = 2,
 					BackgroundColor3 = rgb(0, 221, 255)
 				})
 				
@@ -6638,9 +5116,7 @@
 				alpha_drag.BackgroundColor3 = Color3.fromHSV(h, s, v)
 				
 				visualize.BackgroundColor3 = Color
-				visualize.BackgroundTransparency = 1 - a   -- let the checker read through
-				handler.BackgroundColor3 = Color
-				handler.BackgroundTransparency = 1 - a
+				handler.BackgroundColor3 = Color 
 
 				colorpicker.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
 				
@@ -7233,15 +5709,9 @@
 				-- auto-scroll long lists (huge item catalogs would overflow the screen)
 				scrolling = options.scrolling or (options.items and #options.items > 14) or false,
 				ignore = options.ignore or nil,
-					tooltip = options.tooltip or nil,
 			}
 
 			cfg.default = options.default or (cfg.multi and {cfg.items[1]}) or cfg.items[1] or nil
-
-			-- section holder + inline-subgroup registry (see library:subgroup): a subgroup
-			-- chained off this dropdown reveals while the dropdown has a selection.
-			cfg.parent_holder = self.holder
-			cfg.subgroups = {}
 
 			-- dropdown elements
 				local dropdown_REAL = library:create("TextLabel", {
@@ -7262,7 +5732,6 @@
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
 
-				if cfg.tooltip then library:tool_tip({name = cfg.tooltip, path = dropdown_REAL}) end
 				local main_text      
 				if cfg.name then 
 					local left_components = library:create("Frame", {
@@ -7566,20 +6035,12 @@
 			-- 
 				
 			function cfg.set_element_visible(bool)
-				dropdown_REAL.Visible = bool
+				dropdown_REAL.Visible = bool 
 
-				if main_text then
+				if main_text then 
 					main_text.Visible = bool
-				end
-				-- hiding the dropdown hides its inline subgroups; showing restores them
-				-- to the current selection state
-				if cfg.subgroups then
-					local v = flags[cfg.flag]
-					local has = (type(v) == "table" and #v > 0)
-						or (type(v) == "string" and v ~= "" and v ~= "nun")
-					for _, sub in ipairs(cfg.subgroups) do sub.set_open(bool and has) end
-				end
-			end
+				end 
+			end 
 
 			function cfg.set_visible(bool) 
 				library.current_element_open = cfg.ignore or cfg
@@ -7617,23 +6078,7 @@
 
 				text.Text = is_table and concat(selected, ", ") or selected[1] or "nun"
 				flags[cfg.flag] = is_table and selected or selected[1]
-
-				-- reveal/hide inline subgroups: open while anything is selected
-				if cfg.subgroups then
-					local has = #selected > 0
-					for _, sub in ipairs(cfg.subgroups) do sub.set_open(has) end
-				end
-
-				cfg.callback(flags[cfg.flag])
-			end
-
-			-- register an inline subgroup driven by this dropdown's selection state
-			function cfg.attach_subgroup(sub)
-				insert(cfg.subgroups, sub)
-				local v = flags[cfg.flag]
-				local has = (type(v) == "table" and #v > 0)
-					or (type(v) == "string" and v ~= "" and v ~= "nun")
-				sub.set_open(has and true or false)
+				cfg.callback(flags[cfg.flag]) 
 			end
 			
 			function cfg:refresh_options(refreshed_list) 
@@ -7954,146 +6399,6 @@
 			return setmetatable(cfg, library)
 		end 
 
-		-- Console: a scrolling, timestamped log the script pushes lines into (see
-		-- library:log). Each line is coloured by level so a wall of output still scans.
-		function library:console(options)
-			options = options or {}
-			local cfg = {
-				height = options.height or 200,
-				max_lines = options.max_lines or 200,
-				lines = {},
-			}
-
-			local LEVELS = {
-				INFO    = rgb(90, 150, 255),
-				WARN    = rgb(255, 200, 60),
-				SUCCESS = rgb(90, 230, 120),
-				ERROR   = rgb(255, 80, 80),
-				DEBUG   = rgb(170, 170, 170),
-			}
-
-			-- outline -> inline -> gradient body, the same lining as embedded_box so it
-			-- sits flush in a section
-			local box = library:create("Frame", {
-				Parent = self.holder,
-				Name = "",
-				Size = dim2(1, -8, 0, cfg.height),
-				BorderSizePixel = 0,
-				BorderColor3 = rgb(0, 0, 0),
-				BackgroundColor3 = themes.preset.outline
-			}) library:apply_theme(box, "outline", "BackgroundColor3")
-
-			local inline = library:create("Frame", {
-				Parent = box,
-				Name = "",
-				Position = dim2(0, 1, 0, 1),
-				Size = dim2(1, -2, 1, -2),
-				BorderSizePixel = 0,
-				BorderColor3 = rgb(0, 0, 0),
-				BackgroundColor3 = themes.preset.inline
-			}) library:apply_theme(inline, "inline", "BackgroundColor3")
-
-			local bg = library:create("Frame", {
-				Parent = inline,
-				Name = "",
-				Position = dim2(0, 1, 0, 1),
-				Size = dim2(1, -2, 1, -2),
-				BorderSizePixel = 0,
-				BorderColor3 = rgb(0, 0, 0),
-				BackgroundColor3 = rgb(255, 255, 255)
-			})
-
-			local grad = library:create("UIGradient", {
-				Parent = bg,
-				Rotation = 90,
-				Color = rgbseq{rgbkey(0, rgb(41, 41, 55)), rgbkey(1, rgb(35, 35, 47))}
-			}) library:apply_theme(grad, "contrast", "Color")
-
-			local sf = library:create("ScrollingFrame", {
-				Parent = bg,
-				Name = "",
-				Active = true,
-				BackgroundTransparency = 1,
-				Size = dim2(1, 0, 1, 0),
-				BorderSizePixel = 0,
-				BorderColor3 = rgb(0, 0, 0),
-				MidImage = "rbxassetid://103468666327206",
-				TopImage = "rbxassetid://103468666327206",
-				BottomImage = "rbxassetid://103468666327206",
-				AutomaticCanvasSize = Enum.AutomaticSize.Y,
-				CanvasSize = dim2(0, 0, 0, 0),
-				ScrollBarThickness = 2,
-				ScrollBarImageColor3 = themes.preset.accent,
-				BackgroundColor3 = rgb(255, 255, 255)
-			}) library:apply_theme(sf, "accent", "ScrollBarImageColor3")
-
-			library:create("UIListLayout", {
-				Parent = sf,
-				Padding = dim(0, 2),
-				SortOrder = Enum.SortOrder.LayoutOrder
-			})
-
-			library:create("UIPadding", {
-				Parent = sf,
-				PaddingTop = dim(0, 4),
-				PaddingBottom = dim(0, 4),
-				PaddingLeft = dim(0, 6),
-				PaddingRight = dim(0, 4)
-			})
-
-			function cfg.add(text, level)
-				level = string.upper(tostring(level or "INFO"))
-
-				-- raw Instance.new, NOT library:create: create() registers every TextLabel
-				-- into themes.utility and library.instances, and those lists are never
-				-- pruned on Destroy. A console emitting thousands of lines would grow them
-				-- forever and drag down every theme repaint. Line colour is per-level
-				-- anyway, so there's nothing for the theme system to manage here.
-				local line = Instance.new("TextLabel")
-				line.FontFace = library.font
-				line.TextColor3 = LEVELS[level] or LEVELS.INFO
-				line.Text = string.format("[%s] [%s] %s", os.date("%H:%M:%S"), level, tostring(text))
-				line.BackgroundTransparency = 1
-				line.Size = dim2(1, -6, 0, 0)
-				line.AutomaticSize = Enum.AutomaticSize.Y
-				line.TextXAlignment = Enum.TextXAlignment.Left
-				line.TextWrapped = true
-				line.TextSize = 12
-				line.BorderSizePixel = 0
-				line.LayoutOrder = #cfg.lines + 1
-
-				local stroke = Instance.new("UIStroke")
-				stroke.Color = themes.preset.text_outline
-				stroke.LineJoinMode = Enum.LineJoinMode.Miter
-				stroke.Parent = line
-
-				line.Parent = sf
-				insert(cfg.lines, line)
-
-				-- cap the history: without this a chatty script grows the GUI unbounded
-				while #cfg.lines > cfg.max_lines do
-					local old = remove(cfg.lines, 1)
-					pcall(function() old:Destroy() end)
-				end
-
-				-- stick to the newest line. CanvasPosition clamps to the canvas, so an
-				-- absurd Y just means "the bottom" without having to measure it.
-				sf.CanvasPosition = vec2(0, 1e6)
-				return line
-			end
-
-			function cfg.clear()
-				for _, line in next, cfg.lines do
-					pcall(function() line:Destroy() end)
-				end
-				cfg.lines = {}
-			end
-
-			cfg.holder = sf
-
-			return setmetatable(cfg, library)
-		end
-
 		function library:textbox(options)
 			local cfg = {
 				placeholder = options.placeholder or options.placeholdertext or options.holder or options.holdertext or "type here...",
@@ -8318,7 +6623,6 @@
 			local cfg = {
 				callback = options.callback or function() end, 
 				name = options.text or options.name or "Button",
-					tooltip = options.tooltip or nil,
 			}   
 
 			local button = library:create("TextButton", {
@@ -8333,7 +6637,6 @@
 			})
 
 			library:hoverify(button, button)
-				if cfg.tooltip then library:tool_tip({name = cfg.tooltip, path = button}) end
 			
 			library:apply_theme(button, "outline", "BackgroundColor3") 
 			
@@ -8506,20 +6809,12 @@
 				Name = ""
 			})
 
-			function cfg.set(text)
-				TextLabel.Text = text
-			end
-
-			-- section holder + subgroup support: a label has no on/off state, so a
-			-- subgroup chained off it renders as an always-open indented block (used
-			-- for header-style groupings like "Traders").
-			cfg.parent_holder = self.holder
-			function cfg.attach_subgroup(sub)
-				sub.set_open(true)
-			end
-
-			return setmetatable(cfg, library)
-		end
+			function cfg.set(text) 
+				TextLabel.Text = text 
+			end 
+						
+			return setmetatable(cfg, library)   
+		end 
 
 		function library:playerlist(options) 
 			local cfg = {
@@ -8534,20 +6829,12 @@
 
 			local selected_button; 
 
-			-- only Friendly / Enemy are selectable now; Neutral stays as the internal
-			-- default (unclassified) colour so freshly-joined players read as plain text
 			local patterns = {
+				["Priority"] = rgb(255, 255, 0),
 				["Enemy"] = rgb(255, 0, 0),
 				["Neutral"] = themes.preset.text,
 				["Friendly"] = rgb(0, 255, 255)
 			}
-
-			-- Persistent classifications: playerlist_data holds the LIVE row state but is not a
-			-- flag, so it never made it into a saved config. This name->priority map IS kept in
-			-- `flags` (same table reference), so get_config serialises it and load_config restores
-			-- it via the config_flags setter registered below. LocalPlayer is never stored.
-			if type(flags["playerlist_saved"]) ~= "table" then flags["playerlist_saved"] = {} end
-			library.playerlist_saved = flags["playerlist_saved"]
 
 			-- elements 
 				local playerlist_holder = library:create("TextLabel", {
@@ -8802,66 +7089,32 @@
 					BackgroundColor3 = themes.preset.outline
 				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
 
-				path.instance = TextButton
-				path.line = line
+				path.instance = TextButton 
+				path.line = line 
+				path.priority = "Neutral"
 				path.priority_text = priority_text
-				if tostring(player) == lp.Name then
-					path.priority = "LocalPlayer"
-				else
-					-- restore a saved Friendly/Enemy from the config, if any; otherwise everyone
-					-- defaults to Enemy (unclassified = hostile)
-					local saved = library.playerlist_saved and library.playerlist_saved[tostring(player)]
-					if saved and patterns[saved] then
-						path.priority = saved
-						priority_text.Text = saved
-						priority_text.TextColor3 = patterns[saved]
-					else
-						path.priority = "Enemy"
-						priority_text.Text = "Enemy"
-						priority_text.TextColor3 = patterns["Enemy"]
-					end
-				end
 				-- library.selected_player = players[tostring(player)]
 				
 				TextButton.MouseButton1Click:Connect(function()
-					local is_self = player_name.Text == lp.Name
+					if player_name == lp.Name then 
+						return 
+					end 
 
-					if selected_button then
-						selected_button.TextColor3 = themes.preset.text
-						selected_button = nil
-					end
+					if selected_button then 
+						selected_button.TextColor3 = themes.preset.text 
+						selected_button = nil 
+					end     
 
-					selected_button = player_name
-					player_name.TextColor3 = themes.preset.accent
+					selected_button = player_name 
+					player_name.TextColor3 = themes.preset.accent 
 
 					library.selected_player = player_name.Text
-					library.selected_is_local = is_self
-					-- clicking yourself just shows you as the local player: hide the Priority
-					-- dropdown entirely (you can't classify yourself), and only sync it to a
-					-- real item (Neutral/unclassified isn't in the dropdown anymore)
-					if is_self then
-						if library.playerlist_dropdown then library.playerlist_dropdown.set_element_visible(false) end
-					else
-						if library.playerlist_dropdown then library.playerlist_dropdown.set_element_visible(true) end
-						local pr = path.priority_text.Text
-						if pr == "Friendly" or pr == "Enemy" then
-							library.config_flags["PLAYERLIST_DROPDOWN"](pr)
-						end
-					end
+					library.config_flags["PLAYERLIST_DROPDOWN"](path.priority_text.Text)
 
-					if cfg.labels.player then
-						local obj  = players[player_name.Text]
-						local disp = (obj and obj.DisplayName) or player_name.Text
-						local uid  = (obj and obj.UserId) or 0
-						cfg.labels.player.set("Player: " .. disp .. " (@" .. player_name.Text .. ")")
-						-- KD / Hours are game-specific, so Delta fills the stats line via this
-						-- hook; without it we still show the User ID we already know.
-						local stats
-						if library.playerlist_stats then
-							local ok, s = pcall(library.playerlist_stats, player_name.Text)
-							if ok and type(s) == "string" then stats = s end
-						end
-						cfg.labels.stats.set(stats or ("User ID: " .. tostring(uid)))
+					if cfg.labels.name then 
+						cfg.labels.name.set("User: " .. player_name.Text)
+						cfg.labels.display.set("DisplayName: " .. players[player_name.Text].DisplayName)
+						cfg.labels.uid.set("User Id: " .. players[player_name.Text].UserId)
 					end
 				end)
 
@@ -8888,60 +7141,24 @@
 				path = nil 
 			end 
 
-			function library.prioritize(text)
-				if not library.selected_player then
-					return
-				end
-				if library.selected_is_local then   -- can't reclassify yourself
-					return
-				end
+			function library.prioritize(text) 
+				if not library.selected_player then 
+					return 
+				end 
 
 				local path = library.playerlist_data[library.selected_player]
-				if not path then return end
 				path.priority_text.Text = text
 				path.priority_text.TextColor3 = patterns[text]
 				path.priority = text
-				-- persist it (same table as flags["playerlist_saved"] => saved by get_config)
-				if library.selected_player ~= lp.Name then
-					library.playerlist_saved[library.selected_player] = text
-				end
-			end
+			end 
 
-			function library.get_priority(player)
+			function library.get_priority(player) 
 				local path = library.playerlist_data[tostring(player)]
 
-				if path then
+				if path then 
 					return path.priority
-				end
-			end
-
-			-- re-apply the saved map onto every existing row (called after a config loads, since
-			-- the rows were built before the map was restored). Keyed by name; numeric-index
-			-- duplicates and LocalPlayer are skipped.
-			function library.apply_saved_playerlist()
-				for name, path in pairs(library.playerlist_data) do
-					if type(name) == "string" and type(path) == "table" and path.priority_text and name ~= lp.Name then
-						local saved = library.playerlist_saved[name]
-						if saved and patterns[saved] then
-							path.priority = saved
-							path.priority_text.Text = saved
-							path.priority_text.TextColor3 = patterns[saved]
-						end
-					end
-				end
-			end
-
-			-- config load hook: the .cfg holds a plain name->priority table under this key.
-			-- Copy it INTO the live map (keeping the same table reference flags points at) and
-			-- re-apply to visible rows. Registered so load_config actually consumes the key.
-			library.config_flags["playerlist_saved"] = function(v)
-				if type(v) ~= "table" then return end
-				table.clear(library.playerlist_saved)
-				for k, val in pairs(v) do
-					if type(k) == "string" and type(val) == "string" then library.playerlist_saved[k] = val end
-				end
-				library.apply_saved_playerlist()
-			end
+				end 
+			end 
 
 			players.PlayerAdded:Connect(cfg.create_player)
 			players.PlayerRemoving:Connect(cfg.remove_player)
@@ -8954,8 +7171,9 @@
 			self:textbox({name = "Search", callback = function(txt)
 				cfg.search(txt)
 			end})
-			cfg.labels.player = self:label({name = "Player: ??"})
-			cfg.labels.stats  = self:label({name = "User ID: ?? / KD: ?? / Hours Played: ??"})
+			cfg.labels.name = self:label({name = "Name: ??"})
+			cfg.labels.display = self:label({name = "Display Name: ??"})
+			cfg.labels.uid = self:label({name = "User Id: ??"})
 
 			return setmetatable(cfg, library)
 		end 
