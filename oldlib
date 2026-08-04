@@ -2227,7 +2227,9 @@
 				local configSec, fontSec = column:multi_section({names = {"Configs", "Fonts"}})
 
 				-- configs tab
-					config_holder = configSec:list({flag = "config_name_list"})
+					-- shorter list so the whole Configs tab (list + all button rows) fits inside
+					-- the fixed panel instead of overflowing out the bottom
+					config_holder = configSec:list({flag = "config_name_list", size = 150})
 					configSec:textbox({flag = "config_name_text_box"})
 					configSec:button_holder({})
 					configSec:button({name = "Create", callback = function()
@@ -2482,7 +2484,9 @@
 				local items = holder.items
 
 				local column = setmetatable(items, library):column()
-				window.esp_section = column:section({name = "Main"})
+				-- blank title: the MAIN/AI tab row (built in esp_preview) names this panel,
+				-- so a "Main" section header here would just duplicate it
+				window.esp_section = column:section({name = ""})
 			--  
 
 			-- playerlist 
@@ -2846,10 +2850,27 @@
 					if not cfg._preview_sg then cfg._preview_sg = items.viewportframe:FindFirstAncestorWhichIsA("ScreenGui") end
 					if cfg._preview_sg and not cfg._preview_sg.Enabled then return end
 					local enabled = flags["Enabled"]
+					-- builder toggle state for the global visuals (box/skeleton/chams/head_dot).
+					-- nil until the ESP builder wires up -> fall back to the real flags.
+					local B = cfg._show
 
-					-- Chams (Highlight on the viewport character)
+					-- Chams: when the builder is up (B), a cheap smaller box INSIDE the main box
+					-- (no per-frame Highlight cost). The real Highlight only runs in the
+					-- non-builder fallback (B == nil).
+					if o.chams_box then
+						local cham_on = enabled and (B and B.chams) == true
+						o.chams_box.Visible = cham_on
+						if cham_on then
+							local fc = flags["Chams_Fill_Color"]
+							if fc and fc.Color then
+								o.chams_box.BackgroundColor3 = fc.Color
+								local st = o.chams_box:FindFirstChildOfClass("UIStroke")
+								if st then st.Color = fc.Color end
+							end
+						end
+					end
 					if o.chams then
-						if enabled and flags["Chams"] then
+						if not B and enabled and flags["Chams"] then
 							o.chams.Adornee = character
 							local oc = flags["Chams_Outline"];     if oc and oc.Color then o.chams.OutlineColor = oc.Color end
 							local fc = flags["Chams_Fill_Color"];  if fc and fc.Color then o.chams.FillColor    = fc.Color end
@@ -2885,7 +2906,7 @@
 					-- Head dot (projected onto the head)
 					if o.head_dot then
 						local head = character:FindFirstChild("Head")
-						local sp = (enabled and flags["HeadDot"] and head) and vp_project(head.Position) or nil
+						local sp = (enabled and ((B and B.head_dot) or (not B and flags["HeadDot"])) and head) and vp_project(head.Position) or nil
 						if sp then
 							local sz = (flags["headdot_size"] or 4) * 1.6
 							o.head_dot.Size = dim2(0, sz, 0, sz)
@@ -2897,9 +2918,24 @@
 						end
 					end
 
+					-- Skeleton: when the builder is up (B), a cheap tiny box near the centre — no
+					-- per-frame joint projection at all. The real projected rig only runs in the
+					-- non-builder fallback (B == nil).
+					if o.skel_box then
+						local skel_on = enabled and (B and B.skeleton) == true
+						o.skel_box.Visible = skel_on
+						if skel_on then
+							local col = flags["Skeleton_Color"]
+							if col and col.Color then
+								o.skel_box.BackgroundColor3 = col.Color
+								local st = o.skel_box:FindFirstChildOfClass("UIStroke")
+								if st then st.Color = col.Color end
+							end
+						end
+					end
 					-- Skeleton (projected joints -> rotated thin frames)
 					if o.skel_lines then
-						if enabled and flags["Skeleton"] then
+						if not B and enabled and flags["Skeleton"] then
 							local col = flags["Skeleton_Color"]; col = (col and col.Color) or rgb(255, 255, 255)
 							local th = flags["skel_thickness"] or 2
 							for i, bone in ipairs(PREVIEW_BONES) do
@@ -2955,7 +2991,7 @@
 						cfg.rotation = cfg.rotation
 							+ (cfg.target_rotation - cfg.rotation) * math.clamp((dt or 1/60) * 8, 0, 1)
 					end
-					character:SetPrimaryPartCFrame(cfr(Vector3.new(0, 1, -6)) * angle(0, math.rad(cfg.rotation), 0))
+					character:SetPrimaryPartCFrame(cfr(Vector3.new(0, 0.2, -6)) * angle(0, math.rad(cfg.rotation), 0))
 					update_preview_box()
 					update_preview_overlays()
 				end)
@@ -3340,11 +3376,14 @@
 
 					-- Status tags (Manip / Reload / Exiting / Combat / Looting) stacked under Vis
 					for i, def in ipairs({
-						{"manip",   "MANIP",     rgb(255, 220, 0)},
-						{"reload",  "RELOAD",    rgb(255, 60, 60)},
-						{"exiting", "EXITING",   rgb(0, 235, 90)},
-						{"combat",  "[COMBAT]",  rgb(255, 60, 60)},
-						{"looting", "LOOTING",   rgb(255, 220, 50)},
+						{"manip",    "MANIP",     rgb(255, 220, 0)},
+						{"reload",   "RELOAD",    rgb(255, 60, 60)},
+						{"exiting",  "EXITING",   rgb(0, 235, 90)},
+						{"combat",   "[COMBAT]",  rgb(255, 60, 60)},
+						{"looting",  "LOOTING",   rgb(255, 220, 50)},
+						{"resolved", "RESOLVED",  rgb(180, 120, 255)},
+						{"healing",  "HEALING",   rgb(0, 235, 90)},
+						{"stats",    "[ STATS ]", rgb(200, 200, 200)},
 					}) do
 						objects[ def[1] ] = library:create( "TextLabel" , {
 							FontFace = library.font; Parent = library.cache;
@@ -3416,6 +3455,32 @@
 						FillTransparency = 1; OutlineTransparency = 0;
 						OutlineColor = rgb(255, 255, 255); FillColor = rgb(255, 255, 255);
 					});
+
+					-- Chams / Skeleton preview STAND-INS (cheap, no per-frame projection): the
+					-- builder represents chams as a smaller box INSIDE the main box, and skeleton
+					-- as a tiny box near the centre (per the reference) instead of a real
+					-- highlight / projected rig. They ride objects.holder so they scale with the
+					-- box, so there's zero per-frame math beyond toggling Visible.
+					objects[ "chams_box" ] = library:create( "Frame" , {
+						Parent = objects[ "holder" ]; Name = "\0"; Visible = false;
+						AnchorPoint = vec2(0.5, 0.5); Position = dim2(0.5, 0, 0.5, 0);
+						Size = dim2(1, -14, 1, -14); BackgroundColor3 = rgb(130, 170, 255);
+						BackgroundTransparency = 0.82; BorderSizePixel = 0; ZIndex = 4;
+					});
+					library:create( "UIStroke" , {
+						Parent = objects[ "chams_box" ]; Name = "\0"; Thickness = 1;
+						Color = rgb(130, 170, 255); LineJoinMode = Enum.LineJoinMode.Miter;
+					});
+					objects[ "skel_box" ] = library:create( "Frame" , {
+						Parent = objects[ "holder" ]; Name = "\0"; Visible = false;
+						AnchorPoint = vec2(0.5, 0.5); Position = dim2(0.5, 0, 0.5, 0);
+						Size = dim2(0, 24, 0, 50); BackgroundColor3 = rgb(255, 255, 255);
+						BackgroundTransparency = 0.65; BorderSizePixel = 0; ZIndex = 5;
+					});
+					library:create( "UIStroke" , {
+						Parent = objects[ "skel_box" ]; Name = "\0"; Thickness = 1;
+						Color = rgb(255, 255, 255); LineJoinMode = Enum.LineJoinMode.Miter;
+					});
 				--
 			end
 
@@ -3469,7 +3534,12 @@
 				
 				local is_corner = flags[ "Box_Type" ] == "Corner"
 
-				if flags["Boxes"] then 
+				-- Box visibility: the ESP builder owns it via cfg._show.box (a global chip);
+				-- fall back to the real Boxes flag when the builder isn't up.
+				local box_on
+				if cfg._show then box_on = cfg._show.box == true else box_on = flags["Boxes"] == true end
+
+				if box_on then
 					if is_corner then 
 						objects[ "corners" ].Parent = objects["holder"]
 						objects[ "box_handler" ].Parent = library.cache
@@ -3596,6 +3666,15 @@
 					{key = "exiting",   label = "Exiting"},
 					{key = "combat",    label = "Combat"},
 					{key = "looting",   label = "Looting"},
+					{key = "resolved",  label = "Resolved"},
+					{key = "healing",   label = "Healing"},
+					{key = "stats",     label = "Stats"},
+					-- global toggle chips: whole-preview visuals, NOT side-anchored. Drag out
+					-- of the tray to turn ON, drag back to the tray to turn OFF.
+					{key = "box",       label = "Box",      global = true},
+					{key = "skeleton",  label = "Skeleton", global = true},
+					{key = "chams",     label = "Chams",    global = true},
+					{key = "head_dot",  label = "Head Dot", global = true},
 				}
 				-- sensible starting layout; the rest (edition + status tags) begin in the palette
 				local DEFAULT_SIDE = {
@@ -3603,6 +3682,16 @@
 					hp_number = "left", kd = "right",
 				}
 				local SIDES = {"top", "bottom", "left", "right"}
+
+				-- global toggle chips have no side — they just enable/disable a whole-preview
+				-- visual. cfg._show is the live on/off state the preview overlay + refresh read.
+				local GLOBAL_KEYS = {}
+				for _, c in ipairs(CHIPS) do if c.global then GLOBAL_KEYS[c.key] = true end end
+				-- global chip -> the real ESP flag it mirrors, so a fresh builder (no saved
+				-- layout) starts each global ON if its ESP toggle is already on.
+				local GLOBAL_FLAG = { box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot" }
+				cfg._show = {}
+				for k in pairs(GLOBAL_KEYS) do cfg._show[k] = false end
 
 				-- so refresh_elements switches the temp-loop chips (name/distance/weapon/hp/kd)
 				-- to visibility instead of reparenting them out of their side container
@@ -3628,8 +3717,10 @@
 				end
 				containers.top    = make_side(vec2(0.5, 1), dim2(0.5, 0, 0, -3), Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Bottom)
 				containers.bottom = make_side(vec2(0.5, 0), dim2(0.5, 0, 1, 3),  Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top)
-				containers.left   = make_side(vec2(1, 0.5), dim2(0, -5, 0.5, 0), Enum.HorizontalAlignment.Right,  Enum.VerticalAlignment.Center)
-				containers.right  = make_side(vec2(0, 0.5), dim2(1, 5, 0.5, 0),  Enum.HorizontalAlignment.Left,   Enum.VerticalAlignment.Center)
+				-- left/right hug the box's TOP corners and stack DOWNWARD (NHack-style), so
+				-- side tags read from the top of the side instead of centered on the box.
+				containers.left   = make_side(vec2(1, 0), dim2(0, -5, 0, 0), Enum.HorizontalAlignment.Right,  Enum.VerticalAlignment.Top)
+				containers.right  = make_side(vec2(0, 0), dim2(1, 5, 0, 0),  Enum.HorizontalAlignment.Left,   Enum.VerticalAlignment.Top)
 
 				-- normalize a real element so a UIListLayout can own its position, and give it a
 				-- faint rounded backing used for the hover glow (invisible until hovered)
@@ -3654,18 +3745,48 @@
 				local placed = {}   -- key -> side (nil = in palette)
 				local order  = {}   -- key -> layout order within its side
 
-				-- palette tray: the un-placed chips live in the panel body BELOW the preview,
-				-- OUTSIDE the viewport. LayoutOrder 50 stacks it under the viewport(0) in the
-				-- section's vertical layout. Wrapping horizontal flow so a full set of chips
-				-- wraps onto multiple rows instead of overflowing the panel width.
-				local tray = library:create("Frame", {
+				-- palette tray: a visually SEPARATE box below the preview — its own bordered
+				-- dark panel with a top accent line + label, holding the wrapping row of
+				-- un-placed chips. LayoutOrder 50 stacks it under the viewport(0) in the
+				-- section's vertical layout, so it's obviously distinct from the ESP draw area.
+				local tray_wrap = library:create("Frame", {
 					Parent = self.holder; Name = "\0"; Active = true; LayoutOrder = 50;
-					Size = dim2(1, -8, 0, 72);
+					Size = dim2(1, -8, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+					BackgroundColor3 = themes.preset.high_contrast; BorderSizePixel = 0; ZIndex = 5;
+				}) library:apply_theme(tray_wrap, "high_contrast", "BackgroundColor3")
+				do
+					local st = library:create("UIStroke", {
+						Parent = tray_wrap; Color = themes.preset.inline; Thickness = 1;
+						LineJoinMode = Enum.LineJoinMode.Miter;
+					}) library:apply_theme(st, "inline", "Color")
+				end
+				library:create("UIListLayout", {
+					Parent = tray_wrap; FillDirection = Enum.FillDirection.Vertical;
+					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
+				})
+				library:create("UIPadding", {
+					Parent = tray_wrap; PaddingTop = dim(0, 5); PaddingBottom = dim(0, 7);
+					PaddingLeft = dim(0, 6); PaddingRight = dim(0, 6);
+				})
+				local tray_accent = library:create("Frame", {
+					Parent = tray_wrap; Name = "\0"; LayoutOrder = 0;
+					Size = dim2(1, 0, 0, 2); BackgroundColor3 = themes.preset.accent;
+					BorderSizePixel = 0; ZIndex = 6;
+				}) library:apply_theme(tray_accent, "accent", "BackgroundColor3")
+				local tray_label = library:create("TextLabel", {
+					Parent = tray_wrap; Name = "\0"; LayoutOrder = 1; FontFace = library.font;
+					Text = "UNPLACED  \u{2014}  drag onto the box"; TextSize = 12; TextColor3 = themes.preset.text;
+					BackgroundTransparency = 1; BorderSizePixel = 0; Size = dim2(1, 0, 0, 12);
+					TextXAlignment = Enum.TextXAlignment.Left;
+				}) library:apply_theme(tray_label, "text", "TextColor3")
+				local tray = library:create("Frame", {
+					Parent = tray_wrap; Name = "\0"; LayoutOrder = 2; Active = true;
+					Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
 					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 5;
 				})
 				local tray_layout = library:create("UIListLayout", {
 					Parent = tray; FillDirection = Enum.FillDirection.Horizontal;
-					HorizontalAlignment = Enum.HorizontalAlignment.Center;
+					HorizontalAlignment = Enum.HorizontalAlignment.Left;
 					VerticalAlignment = Enum.VerticalAlignment.Top;
 					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 6);
 				})
@@ -3704,6 +3825,12 @@
 				end
 
 				local function place(key, side, before_key)
+					if GLOBAL_KEYS[key] then
+						placed[key] = "on"; cfg._show[key] = true
+						refresh_palette(); save_layout()
+						if key == "box" and cfg.refresh_elements then pcall(cfg.refresh_elements) end
+						return
+					end
 					objects[key].Parent = containers[side]
 					placed[key] = side
 					if before_key and placed[before_key] == side then
@@ -3722,6 +3849,12 @@
 				end
 
 				local function unplace(key)
+					if GLOBAL_KEYS[key] then
+						placed[key] = nil; cfg._show[key] = false
+						refresh_palette(); save_layout()
+						if key == "box" and cfg.refresh_elements then pcall(cfg.refresh_elements) end
+						return
+					end
 					local side = placed[key]
 					objects[key].Parent = library.cache
 					placed[key] = nil; order[key] = nil
@@ -3763,9 +3896,9 @@
 				make_zone(vec2(1, 0.5), dim2(0, 0, 0.5, 0), dim2(0, 55, 2, 24), "left")
 				make_zone(vec2(0, 0.5), dim2(1, 0, 0.5, 0), dim2(0, 55, 2, 24), "right")
 
-				-- tray = drop-to-remove zone
-				library:connection(tray.MouseEnter, function() if dragging then hover_palette = true end end)
-				library:connection(tray.MouseLeave, function() hover_palette = false end)
+				-- tray box = drop-to-remove zone (the whole bordered panel, not just the chips)
+				library:connection(tray_wrap.MouseEnter, function() if dragging then hover_palette = true end end)
+				library:connection(tray_wrap.MouseLeave, function() hover_palette = false end)
 
 				-- global release commits the drag
 				library:connection(uis.InputEnded, function(input)
@@ -3774,6 +3907,7 @@
 						and input.UserInputType ~= Enum.UserInputType.Touch then return end
 					local key = dragging; dragging = nil
 					if hover_palette then unplace(key)
+					elseif GLOBAL_KEYS[key] then place(key)   -- globals: any non-tray drop turns it ON
 					elseif hover_side then place(key, hover_side, hover_before) end
 					hover_side = nil; hover_before = nil; hover_palette = false
 				end)
@@ -3781,7 +3915,11 @@
 				-- wire each real element as a drag source + build its palette chip
 				for _, c in ipairs(CHIPS) do
 					local o = objects[c.key]
-					if o then
+					-- side chips wire the real preview element as a drag source too. Global
+					-- chips (box/skeleton/chams/head_dot) have no draggable side element —
+					-- chams is a Highlight, box is many frames — so only the tray chip drives
+					-- them, and the preview reads cfg._show for their on/off state.
+					if o and not GLOBAL_KEYS[c.key] then
 						normalize(o)
 						add_hover(o)
 						bind_drag(o, c.key)
@@ -3791,30 +3929,37 @@
 								hover_side = placed[c.key]; hover_before = c.key
 							end
 						end)
-
-						local chip = library:create("TextLabel", {
-							Parent = tray; Name = "\0"; Active = true; FontFace = library.font;
-							Text = c.label; TextColor3 = TXT; BackgroundColor3 = ACCENT;
-							BackgroundTransparency = 1; BorderSizePixel = 0;
-							AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 14); TextSize = 12; ZIndex = 6;
-						})
-						library:create("UICorner", {Parent = chip; CornerRadius = dim(0, 3)})
-						library:create("UIPadding", {Parent = chip; PaddingLeft = dim(0, 4); PaddingRight = dim(0, 4)})
-						palette_chips[c.key] = chip
-						add_hover(chip)
-						bind_drag(chip, c.key)
 					end
+
+					-- every element gets a tray chip (the drag source)
+					local chip = library:create("TextLabel", {
+						Parent = tray; Name = "\0"; Active = true; FontFace = library.font;
+						Text = c.label; TextColor3 = TXT; BackgroundColor3 = ACCENT;
+						BackgroundTransparency = 1; BorderSizePixel = 0;
+						AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 14); TextSize = 12; ZIndex = 6;
+					})
+					library:create("UICorner", {Parent = chip; CornerRadius = dim(0, 3)})
+					library:create("UIPadding", {Parent = chip; PaddingLeft = dim(0, 4); PaddingRight = dim(0, 4)})
+					palette_chips[c.key] = chip
+					add_hover(chip)
+					bind_drag(chip, c.key)
 				end
 
 				-- initial placement: from the esp_layout flag, else the defaults
 				local function apply_from_string(str)
 					for _, c in ipairs(CHIPS) do
-						if placed[c.key] then objects[c.key].Parent = library.cache; placed[c.key] = nil; order[c.key] = nil end
+						if placed[c.key] then
+							if GLOBAL_KEYS[c.key] then cfg._show[c.key] = false
+							else objects[c.key].Parent = library.cache end
+							placed[c.key] = nil; order[c.key] = nil
+						end
 					end
 					local any = false
 					for entry in tostring(str or ""):gmatch("[^,]+") do
 						local k, s, ord = entry:match("^([%w_]+):(%w+):([%d%.]+)$")
-						if k and s and objects[k] and containers[s] then
+						if k and s and GLOBAL_KEYS[k] then
+							placed[k] = "on"; cfg._show[k] = true; any = true   -- side ignored for globals
+						elseif k and s and objects[k] and containers[s] then
 							objects[k].Parent = containers[s]; placed[k] = s; order[k] = tonumber(ord) or 1; any = true
 						end
 					end
@@ -3826,6 +3971,8 @@
 					end
 					for _, s in ipairs(SIDES) do relayout(s) end
 					refresh_palette()
+					-- reflect box on/off (its show/hide lives in refresh_elements, not the overlay)
+					if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 				end
 				-- MAIN / AI tab row: a real tab bar ABOVE the preview, in the panel body —
 				-- NOT floating over the viewport/character. The section holder is a vertical
@@ -3848,10 +3995,9 @@
 					local b = library:create("TextButton", {
 						Parent = tabbar; Name = "\0"; Active = true; AutoButtonColor = false;
 						FontFace = library.font; Text = label; TextSize = 12; LayoutOrder = ord;
-						TextColor3 = TXT; BackgroundColor3 = ACCENT; BackgroundTransparency = 1;
+						TextColor3 = themes.preset.text; BackgroundTransparency = 1;   -- no glow; text-only
 						BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 1, 0); ZIndex = 7;
 					})
-					library:create("UICorner", {Parent = b; CornerRadius = dim(0, 3)})
 					library:create("UIPadding", {Parent = b; PaddingLeft = dim(0, 5); PaddingRight = dim(0, 5)})
 					tab_btns[id] = b
 					return b
@@ -3864,8 +4010,9 @@
 					apply_from_string(flags[lflag()])   -- load the tab we're entering
 					save_layout()
 					for k, b in pairs(tab_btns) do
-						b.BackgroundTransparency = (k == ctx) and 0.4 or 1
-						b.TextColor3 = (k == ctx) and ACCENT or TXT
+						-- no background glow: only the TEXT colour changes (accent = selected),
+						-- read live so it follows the current theme (accent/text), not a stale blue
+						b.TextColor3 = (k == ctx) and themes.preset.accent or themes.preset.text
 					end
 				end
 
@@ -3875,8 +4022,7 @@
 				-- initial: MAIN tab, from esp_layout (else defaults)
 				apply_from_string(flags[lflag()])
 				save_layout()
-				tab_btns.player.BackgroundTransparency = 0.4
-				tab_btns.player.TextColor3 = ACCENT
+				tab_btns.player.TextColor3 = themes.preset.accent
 
 				-- config load re-applies whichever layout is showing (both tabs get a setter)
 				if library.config_flags then
