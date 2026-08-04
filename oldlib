@@ -783,8 +783,14 @@
 			return floor(number * multiplier + 0.5) / multiplier
 		end 
 
-		function library:apply_theme(instance, theme, property) 
-			insert(themes.utility[theme][property], instance)
+		function library:apply_theme(instance, theme, property)
+			-- guard: an unknown theme/property combo (e.g. "inline"/"Color" when that channel
+			-- has no such list) made insert() throw "table expected, got nil" and abort the
+			-- CALLER — that's what silently killed the ESP builder. Skip instead of crashing.
+			local channel = themes.utility[theme]
+			local list = channel and channel[property]
+			if not list then return end
+			insert(list, instance)
 		end
 
 		function library:update_theme(theme, color)
