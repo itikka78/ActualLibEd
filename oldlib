@@ -3654,12 +3654,13 @@
 				local placed = {}   -- key -> side (nil = in palette)
 				local order  = {}   -- key -> layout order within its side
 
-				-- palette tray: the un-placed chips live in the panel's free space BELOW the
-				-- viewport (self.holder), not inside it. Wrapping horizontal flow so a full set
-				-- of chips wraps onto multiple rows instead of overflowing the panel width.
+				-- palette tray: the un-placed chips live in the panel body BELOW the preview,
+				-- OUTSIDE the viewport. LayoutOrder 50 stacks it under the viewport(0) in the
+				-- section's vertical layout. Wrapping horizontal flow so a full set of chips
+				-- wraps onto multiple rows instead of overflowing the panel width.
 				local tray = library:create("Frame", {
-					Parent = self.holder; Name = "\0"; Active = true;
-					Position = dim2(0, 4, 0, 236); Size = dim2(1, -8, 0, 80);
+					Parent = self.holder; Name = "\0"; Active = true; LayoutOrder = 50;
+					Size = dim2(1, -8, 0, 72);
 					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 5;
 				})
 				local tray_layout = library:create("UIListLayout", {
@@ -3826,12 +3827,14 @@
 					for _, s in ipairs(SIDES) do relayout(s) end
 					refresh_palette()
 				end
-				-- MAIN / AI tab bar (top of the viewport): switches which layout the chips edit.
-				-- The AI tab writes esp_layout_ai — that's the AI ESP's layout options.
+				-- MAIN / AI tab row: a real tab bar ABOVE the preview, in the panel body —
+				-- NOT floating over the viewport/character. The section holder is a vertical
+				-- UIListLayout, so LayoutOrder decides the stack: tabs(-1) -> preview(0) ->
+				-- tray(50). Switches which layout the chips edit; AI writes esp_layout_ai.
+				items.viewportframe.LayoutOrder = 0
 				local tabbar = library:create("Frame", {
-					Parent = items.viewportframe; Name = "\0";
-					AnchorPoint = vec2(0, 0); Position = dim2(0, 6, 0, 4);
-					Size = dim2(0, 0, 0, 14); AutomaticSize = Enum.AutomaticSize.X;
+					Parent = self.holder; Name = "\0"; LayoutOrder = -1;
+					Size = dim2(1, -8, 0, 16);
 					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 7;
 				})
 				library:create("UIListLayout", {
