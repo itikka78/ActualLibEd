@@ -3795,7 +3795,7 @@
 							Parent = tray; Name = "\0"; Active = true; FontFace = library.font;
 							Text = c.label; TextColor3 = TXT; BackgroundColor3 = ACCENT;
 							BackgroundTransparency = 1; BorderSizePixel = 0;
-							AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 1, 0); TextSize = 12; ZIndex = 6;
+							AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 14); TextSize = 12; ZIndex = 6;
 						})
 						library:create("UICorner", {Parent = chip; CornerRadius = dim(0, 3)})
 						library:create("UIPadding", {Parent = chip; PaddingLeft = dim(0, 4); PaddingRight = dim(0, 4)})
@@ -3830,13 +3830,13 @@
 				-- The AI tab writes esp_layout_ai — that's the AI ESP's layout options.
 				local tabbar = library:create("Frame", {
 					Parent = items.viewportframe; Name = "\0";
-					AnchorPoint = vec2(0.5, 0); Position = dim2(0.5, 0, 0, 2);
-					Size = dim2(0, 0, 0, 16); AutomaticSize = Enum.AutomaticSize.X;
+					AnchorPoint = vec2(0, 0); Position = dim2(0, 6, 0, 4);
+					Size = dim2(0, 0, 0, 14); AutomaticSize = Enum.AutomaticSize.X;
 					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 7;
 				})
 				library:create("UIListLayout", {
 					Parent = tabbar; FillDirection = Enum.FillDirection.Horizontal;
-					HorizontalAlignment = Enum.HorizontalAlignment.Center;
+					HorizontalAlignment = Enum.HorizontalAlignment.Left;
 					VerticalAlignment = Enum.VerticalAlignment.Center;
 					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
 				})
