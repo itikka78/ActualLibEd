@@ -487,7 +487,9 @@
 			}) library:apply_theme(library._guide_h, "accent", "BackgroundColor3")
 		end
 
-		function library:draggify(frame, key)
+		function library:draggify(frame, key, handle)
+			-- `handle` (optional): only THIS object starts the drag, while `frame` still moves.
+			-- Lets a window drag from just its title bar instead of anywhere in the body.
 			local start_size = frame.Position
 			local start
 
@@ -498,7 +500,7 @@
 				library.ui_draggables[key] = frame
 			end
 
-			frame.InputBegan:Connect(function(input)
+			(handle or frame).InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
 					start = input.Position
 					start_size = frame.Position
@@ -1024,7 +1026,18 @@
 					-- config-saved position: key by an explicit options.pos_key (the main window
 					-- passes one so a version-bumped name doesn't lose its saved spot) or the
 					-- panel's name, which is stable for Style/Config/ESP Preview/Playerlist/Output
-					library:draggify(items.main_holder, options.pos_key or ("panel:" .. cfg.name))
+					if options.top_drag then
+						-- restrict dragging to a top title-bar strip so the body stays free for
+						-- interactive content (e.g. the ESP builder). Sits left of the Close X.
+						items.drag_strip = library:create("Frame", {
+							Parent = items.main_holder; Name = ""; Active = true;
+							BackgroundTransparency = 1; BorderSizePixel = 0;
+							Position = dim2(0, 0, 0, 0); Size = dim2(1, -24, 0, 22); ZIndex = 60;
+						})
+						library:draggify(items.main_holder, options.pos_key or ("panel:" .. cfg.name), items.drag_strip)
+					else
+						library:draggify(items.main_holder, options.pos_key or ("panel:" .. cfg.name))
+					end
 					library:make_resizable(items.main_holder)
 
 					local Close = library:create( "TextButton" , {
@@ -2456,9 +2469,10 @@
 					
 			-- esp preview
 				local holder = library:panel({
-					name = "ESP Preview", 
+					name = "ESP Preview",
 					anchor_point = vec2(0, 0),
 					size = dim2(0, 300, 0, 325),
+					top_drag = true,   -- only the title bar drags the window (body = ESP builder)
 					position = dim2(0, style.items.main_holder.AbsolutePosition.X, 0, style.items.main_holder.AbsolutePosition.Y + style.items.main_holder.AbsoluteSize.Y + 2),
 					-- the "</>" glyph is just what this icon set ships; it's the ESP Preview button
 					image = library:image("output.png", "rbxassetid://77684377836328"),
@@ -3640,22 +3654,30 @@
 				local placed = {}   -- key -> side (nil = in palette)
 				local order  = {}   -- key -> layout order within its side
 
-				-- palette tray at the bottom of the viewport
+				-- palette tray: the un-placed chips live in the panel's free space BELOW the
+				-- viewport (self.holder), not inside it. Wrapping horizontal flow so a full set
+				-- of chips wraps onto multiple rows instead of overflowing the panel width.
 				local tray = library:create("Frame", {
-					Parent = items.viewportframe; Name = "\0"; Active = true;
-					AnchorPoint = vec2(0.5, 1); Position = dim2(0.5, 0, 1, -2);
-					Size = dim2(1, -8, 0, 16); BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 5;
+					Parent = self.holder; Name = "\0"; Active = true;
+					Position = dim2(0, 4, 0, 236); Size = dim2(1, -8, 0, 80);
+					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 5;
 				})
-				library:create("UIListLayout", {
+				local tray_layout = library:create("UIListLayout", {
 					Parent = tray; FillDirection = Enum.FillDirection.Horizontal;
 					HorizontalAlignment = Enum.HorizontalAlignment.Center;
-					VerticalAlignment = Enum.VerticalAlignment.Center;
+					VerticalAlignment = Enum.VerticalAlignment.Top;
 					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 6);
 				})
+				pcall(function() tray_layout.Wraps = true end)   -- newer prop; skip on old builds
 				local palette_chips = {}
 
 				-- drag state, driven entirely by native hover (no absolute/inset math)
 				local dragging, hover_side, hover_before, hover_palette = nil, nil, nil, false
+
+				-- MAIN vs AI tab: the same chips/preview edit two independent layouts, saved to
+				-- esp_layout (players) and esp_layout_ai (AI). The tab bar (built below) flips it.
+				local layout_ctx = "player"
+				local function lflag() return layout_ctx == "ai" and "esp_layout_ai" or "esp_layout" end
 
 				local function relayout(side)
 					local list = {}
@@ -3670,7 +3692,7 @@
 						local s = placed[c.key]
 						if s then parts[#parts + 1] = c.key .. ":" .. s .. ":" .. (order[c.key] or 1) end
 					end
-					flags["esp_layout"] = table.concat(parts, ",")
+					flags[lflag()] = table.concat(parts, ",")   -- into the active tab's flag
 				end
 
 				local function refresh_palette()
@@ -3795,7 +3817,7 @@
 							objects[k].Parent = containers[s]; placed[k] = s; order[k] = tonumber(ord) or 1; any = true
 						end
 					end
-					if not any then
+					if not any and str == nil then   -- only default when the tab was never set (nil, not "")
 						for _, c in ipairs(CHIPS) do
 							local side = DEFAULT_SIDE[c.key]
 							if side and objects[c.key] then objects[c.key].Parent = containers[side]; placed[c.key] = side end
@@ -3804,18 +3826,67 @@
 					for _, s in ipairs(SIDES) do relayout(s) end
 					refresh_palette()
 				end
-				apply_from_string(flags["esp_layout"])
-				save_layout()
+				-- MAIN / AI tab bar (top of the viewport): switches which layout the chips edit.
+				-- The AI tab writes esp_layout_ai — that's the AI ESP's layout options.
+				local tabbar = library:create("Frame", {
+					Parent = items.viewportframe; Name = "\0";
+					AnchorPoint = vec2(0.5, 0); Position = dim2(0.5, 0, 0, 2);
+					Size = dim2(0, 0, 0, 16); AutomaticSize = Enum.AutomaticSize.X;
+					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 7;
+				})
+				library:create("UIListLayout", {
+					Parent = tabbar; FillDirection = Enum.FillDirection.Horizontal;
+					HorizontalAlignment = Enum.HorizontalAlignment.Center;
+					VerticalAlignment = Enum.VerticalAlignment.Center;
+					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
+				})
+				local tab_btns = {}
+				local function make_tab(id, label, ord)
+					local b = library:create("TextButton", {
+						Parent = tabbar; Name = "\0"; Active = true; AutoButtonColor = false;
+						FontFace = library.font; Text = label; TextSize = 12; LayoutOrder = ord;
+						TextColor3 = TXT; BackgroundColor3 = ACCENT; BackgroundTransparency = 1;
+						BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 1, 0); ZIndex = 7;
+					})
+					library:create("UICorner", {Parent = b; CornerRadius = dim(0, 3)})
+					library:create("UIPadding", {Parent = b; PaddingLeft = dim(0, 5); PaddingRight = dim(0, 5)})
+					tab_btns[id] = b
+					return b
+				end
 
-				-- config load re-applies the saved layout (esp_layout only re-applies via a setter)
-				if library.config_flags then
-					library.config_flags["esp_layout"] = function(v)
-						pcall(function()
-							flags["esp_layout"] = tostring(v or "")
-							apply_from_string(flags["esp_layout"])
-							save_layout()
-						end)
+				local function set_context(ctx)
+					if ctx == layout_ctx then return end
+					save_layout()                       -- persist the tab we're leaving
+					layout_ctx = ctx
+					apply_from_string(flags[lflag()])   -- load the tab we're entering
+					save_layout()
+					for k, b in pairs(tab_btns) do
+						b.BackgroundTransparency = (k == ctx) and 0.4 or 1
+						b.TextColor3 = (k == ctx) and ACCENT or TXT
 					end
+				end
+
+				make_tab("player", "MAIN", 1).MouseButton1Click:Connect(function() set_context("player") end)
+				make_tab("ai",     "AI",   2).MouseButton1Click:Connect(function() set_context("ai") end)
+
+				-- initial: MAIN tab, from esp_layout (else defaults)
+				apply_from_string(flags[lflag()])
+				save_layout()
+				tab_btns.player.BackgroundTransparency = 0.4
+				tab_btns.player.TextColor3 = ACCENT
+
+				-- config load re-applies whichever layout is showing (both tabs get a setter)
+				if library.config_flags then
+					local function setter(fl)
+						return function(v)
+							pcall(function()
+								flags[fl] = tostring(v or "")
+								if lflag() == fl then apply_from_string(flags[fl]) end
+							end)
+						end
+					end
+					library.config_flags["esp_layout"]    = setter("esp_layout")
+					library.config_flags["esp_layout_ai"] = setter("esp_layout_ai")
 				end
 			end)
 
