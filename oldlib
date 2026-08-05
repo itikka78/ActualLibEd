@@ -3728,6 +3728,8 @@
 				-- left/right = vertical) instead of stacking in a UIListLayout container.
 				local BAR_KEYS = {}
 				for _, c in ipairs(CHIPS) do if c.bar then BAR_KEYS[c.key] = true end end
+				local LABELS = {}   -- key -> label, for the drag ghost when picking a placed element up
+				for _, c in ipairs(CHIPS) do LABELS[c.key] = c.label end
 				-- global chip -> the real ESP flag it mirrors, so a fresh builder (no saved
 				-- layout) starts each global ON if its ESP toggle is already on.
 				local GLOBAL_FLAG = { box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot", healthbar = "Healthbar", ammo = "Ammobar" }
@@ -3812,6 +3814,26 @@
 				-- state
 				local placed = {}   -- key -> side (nil = in palette)
 				local order  = {}   -- key -> layout order within its side
+
+				-- Side stacks normally hug the box edge; a bar on that edge would sit UNDER the
+				-- text tags. So when a bar occupies a side, push that side's container outward past
+				-- the bar's footprint (SIDE_PUSH), and restore SIDE_BASE when the bar leaves.
+				local SIDE_BASE = {
+					top    = dim2(0.5, 0, 0, -3), bottom = dim2(0.5, 0, 1, 3),
+					left   = dim2(0, -5, 0, 0),   right  = dim2(1, 5, 0, 0),
+				}
+				local SIDE_PUSH = {
+					top    = dim2(0.5, 0, 0, -11), bottom = dim2(0.5, 0, 1, 11),
+					left   = dim2(0, -11, 0, 0),   right  = dim2(1, 11, 0, 0),
+				}
+				local function refresh_side_offsets()
+					for _, s in ipairs({"top", "bottom", "left", "right"}) do
+						if containers[s] then
+							local barHere = (placed.healthbar == s) or (placed.ammo == s)
+							containers[s].Position = barHere and SIDE_PUSH[s] or SIDE_BASE[s]
+						end
+					end
+				end
 
 				-- palette tray: a visually SEPARATE box below the preview — its own bordered
 				-- dark panel with a top accent line + label, holding the wrapping row of
@@ -3930,6 +3952,7 @@
 						side = side or DEFAULT_BAR_SIDE[key] or "bottom"
 						placed[key] = side; cfg._show[key] = true
 						apply_bar(key, side)
+						refresh_side_offsets()
 						refresh_palette(); save_layout()
 						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 						return
@@ -3962,6 +3985,7 @@
 				local function unplace(key)
 					if BAR_KEYS[key] then
 						placed[key] = nil; cfg._show[key] = false
+						refresh_side_offsets()
 						refresh_palette(); save_layout()
 						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 						return
@@ -4061,7 +4085,7 @@
 						-- chips (box/skeleton/chams/head_dot/healthbar/ammo) have no draggable
 						-- side element, so only the tray chip drives them and the preview reads
 						-- cfg._show for their on/off state.
-						if o and not GLOBAL_KEYS[c.key] then
+						if o and not GLOBAL_KEYS[c.key] and not BAR_KEYS[c.key] then
 							normalize(o)
 							add_hover(o)
 							bind_drag(o, c.key, c.label)
@@ -4136,7 +4160,7 @@
 					if drag_ghost then
 						if dragging then
 							local m = uis:GetMouseLocation()
-							drag_ghost.Position = dim2(0, m.X + 12, 0, m.Y + gui_offset - 6)
+							drag_ghost.Position = dim2(0, m.X + 12, 0, m.Y - 6)
 						else
 							kill_drag_ghost()   -- release missed? clean it up
 						end
@@ -4154,6 +4178,23 @@
 					if input.UserInputType == Enum.UserInputType.MouseButton2
 						and cfg._selected_key and cfg.on_element_rightclick then
 						pcall(cfg.on_element_rightclick, cfg._selected_key)
+					end
+				end)
+
+				-- Pickup-from-box: press on a PLACED global/bar's drawn visual (the hover selection
+				-- under the cursor set cfg._selected_key) to grab and DRAG it — same as dragging a
+				-- side chip. Drop on the tray to remove it, or (bars) onto a different side to move
+				-- it. This makes every element draggable both ways, so nothing is click-only. A tray
+				-- chip press already set `dragging` (we no-op then); hovering a tray chip leaves
+				-- cfg._selected_key nil so this can't mis-fire there.
+				library:connection(uis.InputBegan, function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1
+						and input.UserInputType ~= Enum.UserInputType.Touch then return end
+					if dragging then return end
+					local key = cfg._selected_key
+					if key and (GLOBAL_KEYS[key] or BAR_KEYS[key]) and placed[key] then
+						dragging = key; hover_side = nil; hover_before = nil; hover_palette = false
+						make_drag_ghost(LABELS[key] or key)
 					end
 				end)
 
@@ -4184,6 +4225,7 @@
 						end
 					end
 					for _, s in ipairs(SIDES) do relayout(s) end
+					refresh_side_offsets()
 					refresh_palette()
 					-- reflect box on/off (its show/hide lives in refresh_elements, not the overlay)
 					if cfg.refresh_elements then pcall(cfg.refresh_elements) end
