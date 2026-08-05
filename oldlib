@@ -2997,6 +2997,47 @@
 							o.ammo_text.Text = "21 / 30"
 						end
 					end
+
+					-- Box FILL + gradients + Animated Box (preview fidelity). The static preview
+					-- box only drew a solid outline, so Fill Opacity, the Box_Color/Box_Fill
+					-- gradients and the rotating "Animated Box" sweep never showed. A fill frame
+					-- behind the box carries the fill gradient; the outline stroke gets a gradient
+					-- too; "Animated Box" spins both. Gated on box placement like the outline (no
+					-- master-Enabled requirement), so it matches when the box is drawn.
+					if o.holder then
+						local box_on = (B and B.box == true) or (not B and flags["Boxes"] == true)
+						if not o.box_fill then
+							local f = library:create("Frame", {
+								Parent = o.holder; Name = "\0"; ZIndex = 0; Visible = false;
+								BackgroundColor3 = rgb(255, 255, 255); BorderSizePixel = 0;
+								Size = dim2(1, 0, 1, 0); Position = dim2(0, 0, 0, 0);
+							})
+							o.box_fill = f
+							o.box_fill_grad = library:create("UIGradient", {Parent = f; Rotation = 90})
+						end
+						if o.box_color and not o.box_color_grad then
+							o.box_color_grad = library:create("UIGradient", {Parent = o.box_color; Rotation = 90})
+						end
+						if box_on then
+							local c1 = (flags["Box_Color"] and flags["Box_Color"].Color) or rgb(255, 255, 255)
+							local c2 = (flags["Box_Color_2"] and flags["Box_Color_2"].Color) or rgb(0, 0, 0)
+							local f1 = (flags["Box_Fill_Color"] and flags["Box_Fill_Color"].Color) or rgb(255, 255, 255)
+							local f2 = (flags["Box_Fill_Color_2"] and flags["Box_Fill_Color_2"].Color) or rgb(0, 0, 0)
+							local fillOp = math.clamp((flags["box_fill_opacity"] or 15) / 100, 0, 1)
+							local rot = (flags["Box_Animated"] == true) and ((tick() * 120) % 360) or 90
+							o.box_fill_grad.Color = rgbseq{rgbkey(0, f1), rgbkey(1, f2)}
+							o.box_fill_grad.Rotation = rot
+							o.box_fill.BackgroundTransparency = 1 - fillOp
+							o.box_fill.Visible = true
+							if o.box_color_grad then
+								o.box_color_grad.Color = rgbseq{rgbkey(0, c1), rgbkey(1, c2)}
+								o.box_color_grad.Rotation = rot
+								o.box_color.Color = rgb(255, 255, 255)   -- white base so the gradient shows pure
+							end
+						else
+							o.box_fill.Visible = false
+						end
+					end
 				end
 
 				library:connection(run.RenderStepped, function(dt)
@@ -4380,12 +4421,20 @@
 				end)
 
 				-- auto-hide with the UI: when the preview panel / menu is toggled off, the popup
-				-- lives on the shared sgui overlay (which stays enabled), so hide it explicitly
-				-- instead of leaving it stuck on screen.
+				-- (and any dropdown/colorpicker opened from it) lives on the shared sgui overlay
+				-- which stays enabled, so hide them explicitly instead of leaving them stuck on
+				-- screen. A dropdown list opened inside the popup floats on that overlay too, so
+				-- closing library.current_element_open is what clears the "dropdown stays on close".
 				library:connection(run.RenderStepped, function()
-					if settings_pop and settings_pop.Visible
-						and cfg._preview_sg and not cfg._preview_sg.Enabled then
-						settings_pop.Visible = false
+					if cfg._preview_sg and not cfg._preview_sg.Enabled then
+						if settings_pop and settings_pop.Visible then settings_pop.Visible = false end
+						if library.current_element_open then
+							pcall(function()
+								library.current_element_open.set_visible(false)
+								library.current_element_open.open = false
+								library.current_element_open = nil
+							end)
+						end
 					end
 				end)
 
@@ -4473,9 +4522,25 @@
 
 				local function set_context(ctx)
 					if ctx == layout_ctx then return end
+					-- close the settings popup (+ any open dropdown) from the tab we're leaving,
+					-- so it can't linger over — or half-apply into — the tab we're entering.
+					if settings_pop and settings_pop.Visible then settings_pop.Visible = false end
+					if library.current_element_open then
+						pcall(function()
+							library.current_element_open.set_visible(false)
+							library.current_element_open.open = false
+							library.current_element_open = nil
+						end)
+					end
 					save_layout()                       -- persist the tab we're leaving
 					layout_ctx = ctx
-					apply_from_string(flags[lflag()])   -- load the tab we're entering
+					-- pcall so a bad saved layout / transient nil can't hard-break the switch and
+					-- leave the builder half-cleared (was the intermittent "AI tab breaks").
+					local ok, err = pcall(apply_from_string, flags[lflag()])
+					if not ok then
+						warn("[ESP tab " .. tostring(ctx) .. "] " .. tostring(err))
+						pcall(function() library:log("ESP tab switch to '" .. tostring(ctx) .. "' failed: " .. tostring(err), "ERROR") end)
+					end
 					save_layout()
 					for k, b in pairs(tab_btns) do
 						-- no background glow: only the TEXT colour changes (accent = selected),
