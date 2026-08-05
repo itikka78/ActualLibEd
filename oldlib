@@ -3396,8 +3396,6 @@
 						{"exiting",  "EXITING",   rgb(0, 235, 90)},
 						{"combat",   "[COMBAT]",  rgb(255, 60, 60)},
 						{"looting",  "LOOTING",   rgb(255, 220, 50)},
-						{"resolved", "RESOLVED",  rgb(180, 120, 255)},
-						{"healing",  "HEALING",   rgb(0, 235, 90)},
 						{"stats",    "[ STATS ]", rgb(200, 200, 200)},
 					}) do
 						objects[ def[1] ] = library:create( "TextLabel" , {
@@ -3702,8 +3700,6 @@
 					{key = "exiting",   label = "Exiting"},
 					{key = "combat",    label = "Combat"},
 					{key = "looting",   label = "Looting"},
-					{key = "resolved",  label = "Resolved"},
-					{key = "healing",   label = "Healing"},
 					{key = "stats",     label = "Stats"},
 					-- global toggle chips: whole-preview visuals, NOT side-anchored. Drag out
 					-- of the tray to turn ON, drag back to the tray to turn OFF.
@@ -3792,27 +3788,63 @@
 				-- library.cache (off), so refresh_elements only has to toggle its Parent.
 				local DEFAULT_BAR_SIDE = { healthbar = "left", ammo = "bottom" }
 				cfg._bar_horiz = cfg._bar_horiz or {}
-				local function apply_bar(key, side)
+				local BAR_ORDER = { "healthbar", "ammo" }   -- stable slot order on a shared side
+				local function bar_outer(key)
+					return (key == "healthbar") and objects.healthbar_holder or objects.ammo_bg
+				end
+				-- Lay out EVERY bar currently on `side`, splitting the edge so two bars sit
+				-- side-by-side (like two tags in a row) instead of stacking on top of each
+				-- other. Horizontal sides (top/bottom) split the WIDTH; vertical sides
+				-- (left/right) split the HEIGHT. One bar on the side = fills the whole edge.
+				local placed   -- forward ref (declared just below); read by the layout fn
+				local function layout_bars_on_side(side)
+					if not side then return end
 					local horiz = (side == "top" or side == "bottom")
-					cfg._bar_horiz[key] = horiz
-					local outer = (key == "healthbar") and objects.healthbar_holder or objects.ammo_bg
-					if not outer then return end
-					local T = 4   -- bar thickness
-					if side == "left" then
-						outer.AnchorPoint = vec2(1, 0);   outer.Position = dim2(0, -5, 0, 0);   outer.Size = dim2(0, T, 1, 0)
-					elseif side == "right" then
-						outer.AnchorPoint = vec2(0, 0);   outer.Position = dim2(1, 5, 0, 0);    outer.Size = dim2(0, T, 1, 0)
-					elseif side == "top" then
-						outer.AnchorPoint = vec2(0.5, 1); outer.Position = dim2(0.5, 0, 0, -5); outer.Size = dim2(1, 0, 0, T)
-					else -- bottom
-						outer.AnchorPoint = vec2(0.5, 0); outer.Position = dim2(0.5, 0, 1, 5);  outer.Size = dim2(1, 0, 0, T)
+					local list = {}
+					for _, k in ipairs(BAR_ORDER) do if placed[k] == side then list[#list + 1] = k end end
+					local n = #list
+					if n == 0 then return end
+					for i, key in ipairs(list) do
+						local outer = bar_outer(key)
+						if outer then
+							cfg._bar_horiz[key] = horiz
+							-- thickness reads the real ESP stat live: healthbar = hp_bar_width,
+							-- ammo = ammo_bar_width (both 1..8, default 3). +1 keeps the default
+							-- looking like the old fixed 4px bar.
+							local wf = (key == "healthbar") and "hp_bar_width" or "ammo_bar_width"
+							local T = math.clamp(tonumber(flags[wf]) or 3, 1, 8) + 1
+							local frac = 1 / n
+							local off  = (i - 1) * frac
+							if horiz then
+								-- split WIDTH: bars packed along the top/bottom edge, 2px gutter
+								local ay = (side == "top") and 1 or 0
+								local oy = (side == "top") and -5 or 5
+								local py = (side == "top") and 0 or 1
+								outer.AnchorPoint = vec2(0, ay)
+								outer.Position    = dim2(off, 1, py, oy)
+								outer.Size        = dim2(frac, -2, 0, T)
+							else
+								-- split HEIGHT: bars packed along the left/right edge, 2px gutter
+								local ax = (side == "left") and 1 or 0
+								local ox = (side == "left") and -5 or 5
+								local px = (side == "left") and 0 or 1
+								outer.AnchorPoint = vec2(ax, 0)
+								outer.Position    = dim2(px, ox, off, 1)
+								outer.Size        = dim2(0, T, frac, -2)
+							end
+							-- ammo fill has a gradient; rotate it to run along the bar
+							if key == "ammo" and objects.ammo_grad then objects.ammo_grad.Rotation = horiz and 0 or 90 end
+						end
 					end
-					-- ammo fill has a gradient; rotate it to run along the bar (health is a solid lerp)
-					if key == "ammo" and objects.ammo_grad then objects.ammo_grad.Rotation = horiz and 0 or 90 end
+				end
+				-- kept as the single-key entry point (apply_from_string / callers): position
+				-- `key` on `side` by re-laying every bar sharing that side.
+				local function apply_bar(key, side)
+					layout_bars_on_side(side)
 				end
 
 				-- state
-				local placed = {}   -- key -> side (nil = in palette)
+				placed = {}   -- key -> side (nil = in palette)
 				local order  = {}   -- key -> layout order within its side
 
 				-- Side stacks normally hug the box edge; a bar on that edge would sit UNDER the
@@ -3886,6 +3918,7 @@
 
 				-- drag state, driven entirely by native hover (no absolute/inset math)
 				local dragging, hover_side, hover_before, hover_palette = nil, nil, nil, false
+				local last_hpw, last_ammow   -- last-seen bar thickness stats (live re-pack)
 
 				-- Drag ghost: a floating clone of the chip that follows the cursor while dragging,
 				-- so it reads as "picking up" the element instead of teleporting on drop. Lives on
@@ -3947,19 +3980,39 @@
 					end
 				end
 
+				-- APPLY = ON: placing a feature drives the REAL ESP flag (not just the preview),
+				-- so drag-to-apply replaces the old on/off toggle. ctx-aware: the AI tab writes
+				-- the AI_ flag (AI_F[k] == "AI_"..PLAYER_F[k]). Statuses (manip/reload/… go through
+				-- a multiselect) have no simple boolean, so they're preview-only for now.
+				local REAL_FLAG = {
+					box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot",
+					healthbar = "Healthbar", ammo = "Ammobar",
+					name = "Names", distance = "Distance", weapon = "Weapon",
+					hp_number = "HP_Text", kd = "ESP_KD", edition = "ESP_Edition",
+				}
+				local function sync_real_flag(key, on)
+					local fl = REAL_FLAG[key]
+					if not fl then return end
+					if layout_ctx == "ai" then fl = "AI_" .. fl end
+					flags[fl] = on and true or false
+					if properties.on_apply then pcall(properties.on_apply, key, on, layout_ctx) end
+				end
+
 				local function place(key, side, before_key)
 					if BAR_KEYS[key] then
+						local old = placed[key]
 						side = side or DEFAULT_BAR_SIDE[key] or "bottom"
 						placed[key] = side; cfg._show[key] = true
-						apply_bar(key, side)
+						layout_bars_on_side(side)
+						if old and old ~= side then layout_bars_on_side(old) end   -- re-pack the side it left
 						refresh_side_offsets()
-						refresh_palette(); save_layout()
+						refresh_palette(); save_layout(); sync_real_flag(key, true)
 						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 						return
 					end
 					if GLOBAL_KEYS[key] then
 						placed[key] = "on"; cfg._show[key] = true
-						refresh_palette(); save_layout()
+						refresh_palette(); save_layout(); sync_real_flag(key, true)
 						-- box/healthbar/ammo are shown via refresh_elements (parenting), not the
 						-- per-frame overlay, so re-run it on any global toggle to reflect instantly
 						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
@@ -3967,6 +4020,7 @@
 					end
 					objects[key].Parent = containers[side]
 					placed[key] = side
+					sync_real_flag(key, true)
 					if before_key and placed[before_key] == side then
 						order[key] = (order[before_key] or 1) - 0.5   -- land just before it
 					else
@@ -3984,15 +4038,17 @@
 
 				local function unplace(key)
 					if BAR_KEYS[key] then
+						local old = placed[key]
 						placed[key] = nil; cfg._show[key] = false
+						if old then layout_bars_on_side(old) end   -- re-pack the remaining bar to full edge
 						refresh_side_offsets()
-						refresh_palette(); save_layout()
+						refresh_palette(); save_layout(); sync_real_flag(key, false)
 						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 						return
 					end
 					if GLOBAL_KEYS[key] then
 						placed[key] = nil; cfg._show[key] = false
-						refresh_palette(); save_layout()
+						refresh_palette(); save_layout(); sync_real_flag(key, false)
 						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 						return
 					end
@@ -4002,6 +4058,7 @@
 					if side then relayout(side) end
 					refresh_palette()
 					save_layout()
+					sync_real_flag(key, false)
 				end
 
 				local function add_hover(o)
@@ -4051,23 +4108,21 @@
 						and input.UserInputType ~= Enum.UserInputType.Touch then return end
 					local key = dragging; dragging = nil
 					if BAR_KEYS[key] then
-						-- bar chip needs a side; drop on a side zone places it there (orientation
-						-- follows the side). A click / drop back on the tray toggles it; a drop on
-						-- the box with no side falls back to the bar's default side.
-						if hover_side then place(key, hover_side)
-						elseif library:hovering(tray_wrap) then
-							if placed[key] then unplace(key) else place(key) end
-						else place(key) end
+						-- DRAG-ONLY (no click-to-apply): dropping over the box enables/moves the
+						-- bar (a side zone picks the edge; the box centre uses the default side);
+						-- dropping back on the tray removes it. A click that never left the tray
+						-- does nothing. hover_palette only fires on ENTER, so test the tray here.
+						if library:hovering(tray_wrap) then
+							if placed[key] then unplace(key) end       -- drag back to tray removes
+						elseif hover_side then place(key, hover_side)  -- dropped on an edge
+						else place(key) end                            -- dropped on the box centre → default side
 					elseif GLOBAL_KEYS[key] then
-						-- global chip: dropped on a box side = ON; a click/drop back on the tray
-						-- TOGGLES it. hover_palette only fires on ENTER, so a click that never
-						-- leaves the tray wouldn't set it — test the tray at release instead.
-						if hover_side then
-							place(key)
-						elseif library:hovering(tray_wrap) then
-							if placed[key] then unplace(key) else place(key) end
+						-- DRAG-ONLY: drag onto the box to enable, drag back to the tray to remove.
+						-- A plain click in the tray no longer toggles it on.
+						if library:hovering(tray_wrap) then
+							if placed[key] then unplace(key) end       -- drag back to tray removes
 						else
-							place(key)
+							place(key)                                 -- dropped anywhere on the box → ON
 						end
 					elseif hover_palette then unplace(key)
 					elseif hover_side then place(key, hover_side, hover_before) end
@@ -4169,11 +4224,97 @@
 						if sel_overlay.Visible then sel_overlay.Visible = false end
 						return
 					end
+					-- live bar thickness: if the hp_bar_width / ammo_bar_width stat changed,
+					-- re-pack that side so the preview bar grows/shrinks with the slider.
+					local hw, aw = flags["hp_bar_width"], flags["ammo_bar_width"]
+					if hw ~= last_hpw then last_hpw = hw; if placed.healthbar then layout_bars_on_side(placed.healthbar) end end
+					if aw ~= last_ammow then last_ammow = aw; if placed.ammo then layout_bars_on_side(placed.ammo) end end
 					update_selection()
 				end)
 
-				-- right-click groundwork: over a selected element, hand the key to the (future)
-				-- options menu. cfg.on_element_rightclick is unset for now, so this is a no-op.
+				-- ── RIGHT-CLICK SETTINGS POPUP ─────────────────────────────────────────
+				-- Applied element -> right-click -> a floating panel of THAT element's ESP
+				-- settings. The consumer registers a builder per element key via
+				-- properties.panels[key] = function(section, key, ctx); we hand it a REAL
+				-- library section parented into the popup, so the builder uses the exact same
+				-- control API (toggle/slider/colorpicker/dropdown) bound to the real flags —
+				-- editing them drives the live ESP too. Built ONCE per (key,ctx) then just
+				-- shown/hidden + repositioned, so opening never re-seeds/clobbers values, and
+				-- MAIN vs AI tabs each get their own flag-bound panel. If no panels are
+				-- registered the whole thing is inert and right-click stays a no-op.
+				local settings_panels = properties.panels or {}
+				local settings_pop, settings_body, settings_built
+				if next(settings_panels) ~= nil then
+					settings_built = {}   -- "key:ctx" -> wrapper frame (lazy, build once)
+					settings_pop = library:create("Frame", {
+						Parent = sgui; Name = "\0"; Visible = false; ZIndex = 9990;
+						BackgroundColor3 = themes.preset.high_contrast; BorderSizePixel = 0;
+						AnchorPoint = vec2(0, 0); Size = dim2(0, 226, 0, 0);
+						AutomaticSize = Enum.AutomaticSize.Y;
+					}) library:apply_theme(settings_pop, "high_contrast", "BackgroundColor3")
+					do
+						local st = library:create("UIStroke", {
+							Parent = settings_pop; Color = themes.preset.accent; Thickness = 1;
+							LineJoinMode = Enum.LineJoinMode.Miter;
+						}) library:apply_theme(st, "accent", "Color")
+					end
+					library:create("UICorner", {Parent = settings_pop; CornerRadius = dim(0, 4)})
+					library:create("UIListLayout", {
+						Parent = settings_pop; FillDirection = Enum.FillDirection.Vertical;
+						SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
+					})
+					library:create("UIPadding", {
+						Parent = settings_pop; PaddingTop = dim(0, 6); PaddingBottom = dim(0, 8);
+						PaddingLeft = dim(0, 6); PaddingRight = dim(0, 6);
+					})
+					-- header: close button only (each section carries its own titled frame)
+					local header = library:create("Frame", {
+						Parent = settings_pop; Name = "\0"; LayoutOrder = 0;
+						BackgroundTransparency = 1; BorderSizePixel = 0; Size = dim2(1, 0, 0, 14);
+					})
+					local closeb = library:create("TextButton", {
+						Parent = header; Name = "\0"; FontFace = library.font; Text = "\u{2715}";
+						TextColor3 = TXT; BackgroundTransparency = 1; TextSize = 13; AutoButtonColor = false;
+						AnchorPoint = vec2(1, 0); Position = dim2(1, 0, 0, 0); Size = dim2(0, 16, 1, 0);
+					}) library:apply_theme(closeb, "text", "TextColor3")
+					library:connection(closeb.MouseButton1Click, function() settings_pop.Visible = false end)
+					settings_body = library:create("Frame", {
+						Parent = settings_pop; Name = "\0"; LayoutOrder = 1;
+						BackgroundTransparency = 1; BorderSizePixel = 0;
+						Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+					})
+					library:create("UIListLayout", {
+						Parent = settings_body; FillDirection = Enum.FillDirection.Vertical;
+						SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
+					})
+				end
+
+				local function open_settings(key)
+					if not settings_pop or not settings_panels[key] then return end
+					local ctx = layout_ctx                     -- MAIN vs AI: bind the right flags
+					local bkey = tostring(key) .. ":" .. ctx
+					if not settings_built[bkey] then
+						local wrap = library:create("Frame", {
+							Parent = settings_body; Name = "\0"; Visible = false;
+							BackgroundTransparency = 1; BorderSizePixel = 0;
+							Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+						})
+						local host = library.section({holder = wrap}, {name = (LABELS[key] or key) .. " Settings"})
+						local okp, errp = pcall(settings_panels[key], host, key, ctx)
+						if not okp then
+							warn("[ESP panel " .. tostring(key) .. "] " .. tostring(errp))
+							pcall(function() library:log("ESP panel '" .. tostring(key) .. "' failed: " .. tostring(errp), "ERROR") end)
+						end
+						settings_built[bkey] = wrap
+					end
+					for k, w in pairs(settings_built) do w.Visible = (k == bkey) end
+					local m = uis:GetMouseLocation()
+					settings_pop.Position = dim2(0, m.X + 14, 0, m.Y - 6)   -- raw (IgnoreGuiInset sgui)
+					settings_pop.Visible = true
+				end
+				cfg.on_element_rightclick = open_settings
+
+				-- over a selected applied element, right-click opens that element's settings popup.
 				library:connection(uis.InputBegan, function(input)
 					if input.UserInputType == Enum.UserInputType.MouseButton2
 						and cfg._selected_key and cfg.on_element_rightclick then
@@ -4227,6 +4368,10 @@
 					for _, s in ipairs(SIDES) do relayout(s) end
 					refresh_side_offsets()
 					refresh_palette()
+					-- restored placements turn their real ESP flag ON (this ctx's flags). We only
+					-- push ON here — not OFF for unplaced keys — so an existing ESP-tab toggle
+					-- isn't silently cleared at load during the toggle->builder transition.
+					for k in pairs(REAL_FLAG) do if placed[k] ~= nil then sync_real_flag(k, true) end end
 					-- reflect box on/off (its show/hide lives in refresh_elements, not the overlay)
 					if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 				end
