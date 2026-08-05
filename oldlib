@@ -119,8 +119,9 @@
 				["Color"] = {}, 
 			},
 			["inline"] = {
-				["BackgroundColor3"] = {}, 	
+				["BackgroundColor3"] = {},
 				["ImageColor3"] = {},
+				["Color"] = {},   -- UIStroke.Color registrations (e.g. the ESP builder tray border)
 			},
 			["accent"] = {
 				["Color"] = {}, 
@@ -2967,8 +2968,15 @@
 						end
 					end
 
-					-- Ammo bar fill (static 70% showcase; colours are set in refresh_elements)
-					if o.ammo_fill then o.ammo_fill.Size = dim2(0.7, 0, 1, 0) end
+					-- Ammo bar fill (static 70% showcase; colours set in refresh_elements). Grows
+					-- left->right on a horizontal bar (top/bottom), bottom->up on a vertical one.
+					if o.ammo_fill then
+						if cfg._bar_horiz and cfg._bar_horiz.ammo then
+							o.ammo_fill.AnchorPoint = vec2(0, 0); o.ammo_fill.Position = dim2(0, 0, 0, 0); o.ammo_fill.Size = dim2(0.7, 0, 1, 0)
+						else
+							o.ammo_fill.AnchorPoint = vec2(0, 1); o.ammo_fill.Position = dim2(0, 0, 1, 0); o.ammo_fill.Size = dim2(1, 0, 0.7, 0)
+						end
+					end
 
 					-- Distance readout: live unit (m / st, follows the esp_dist_unit dropdown) with
 					-- a number tweening 0..100 so it reads as a real distance ticking.
@@ -3502,8 +3510,14 @@
 				local multiplier = humanoid.MaxHealth * math.abs(math.sin(tick() * 2)) / humanoid.MaxHealth
 				local color = flags[ "Health_Low" ].Color:Lerp( flags["Health_High"].Color, multiplier)
 
-				objects[ "healthbar" ].Size = UDim2.new(1, -2, multiplier, -2)
-				objects[ "healthbar" ].Position = UDim2.new(0, 1, 1 - multiplier, 1)
+				-- horizontal bar (top/bottom) grows left->right; vertical (left/right) grows bottom->up
+				if cfg._bar_horiz and cfg._bar_horiz.healthbar then
+					objects[ "healthbar" ].Size = UDim2.new(multiplier, -2, 1, -2)
+					objects[ "healthbar" ].Position = UDim2.new(0, 1, 0, 1)
+				else
+					objects[ "healthbar" ].Size = UDim2.new(1, -2, multiplier, -2)
+					objects[ "healthbar" ].Position = UDim2.new(0, 1, 1 - multiplier, 1)
+				end
 				objects[ "healthbar" ].BackgroundColor3 = color
 
 				-- HP number mirrors the animated health value
@@ -3697,8 +3711,8 @@
 					{key = "skeleton",  label = "Skeleton",  global = true},
 					{key = "chams",     label = "Chams",     global = true},
 					{key = "head_dot",  label = "Head Dot",  global = true},
-					{key = "healthbar", label = "Healthbar", global = true},
-					{key = "ammo",      label = "Ammo Bar",  global = true},
+					{key = "healthbar", label = "Healthbar", bar = true},
+					{key = "ammo",      label = "Ammo Bar",  bar = true},
 				}
 				-- nothing placed by default: every chip (text tags AND the box/skeleton/chams/
 				-- head_dot globals) starts in the tray, so the box is empty until you drag/click
@@ -3709,11 +3723,17 @@
 				-- visual. cfg._show is the live on/off state the preview overlay + refresh read.
 				local GLOBAL_KEYS = {}
 				for _, c in ipairs(CHIPS) do if c.global then GLOBAL_KEYS[c.key] = true end end
+				-- BAR chips (healthbar / ammo): draggable to a side like a side chip, but they
+				-- render as a bar whose orientation follows the side (top/bottom = horizontal,
+				-- left/right = vertical) instead of stacking in a UIListLayout container.
+				local BAR_KEYS = {}
+				for _, c in ipairs(CHIPS) do if c.bar then BAR_KEYS[c.key] = true end end
 				-- global chip -> the real ESP flag it mirrors, so a fresh builder (no saved
 				-- layout) starts each global ON if its ESP toggle is already on.
 				local GLOBAL_FLAG = { box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot", healthbar = "Healthbar", ammo = "Ammobar" }
 				cfg._show = {}
 				for k in pairs(GLOBAL_KEYS) do cfg._show[k] = false end
+				for k in pairs(BAR_KEYS)    do cfg._show[k] = false end
 
 				-- so refresh_elements switches the temp-loop chips (name/distance/weapon/hp/kd)
 				-- to visibility instead of reparenting them out of their side container
@@ -3761,6 +3781,32 @@
 						library:create("UIPadding", {Parent = o;
 							PaddingLeft = dim(0, 3); PaddingRight = dim(0, 3)})
 					end
+				end
+
+				-- BAR positioning: place a bar's outer frame on the chosen edge and record its
+				-- orientation in cfg._bar_horiz, which change_health (health fill) and
+				-- update_preview_overlays (ammo fill) read to grow the fill the right way. The
+				-- Position/Size set here persist on the instance even while it's parked in
+				-- library.cache (off), so refresh_elements only has to toggle its Parent.
+				local DEFAULT_BAR_SIDE = { healthbar = "left", ammo = "bottom" }
+				cfg._bar_horiz = cfg._bar_horiz or {}
+				local function apply_bar(key, side)
+					local horiz = (side == "top" or side == "bottom")
+					cfg._bar_horiz[key] = horiz
+					local outer = (key == "healthbar") and objects.healthbar_holder or objects.ammo_bg
+					if not outer then return end
+					local T = 4   -- bar thickness
+					if side == "left" then
+						outer.AnchorPoint = vec2(1, 0);   outer.Position = dim2(0, -5, 0, 0);   outer.Size = dim2(0, T, 1, 0)
+					elseif side == "right" then
+						outer.AnchorPoint = vec2(0, 0);   outer.Position = dim2(1, 5, 0, 0);    outer.Size = dim2(0, T, 1, 0)
+					elseif side == "top" then
+						outer.AnchorPoint = vec2(0.5, 1); outer.Position = dim2(0.5, 0, 0, -5); outer.Size = dim2(1, 0, 0, T)
+					else -- bottom
+						outer.AnchorPoint = vec2(0.5, 0); outer.Position = dim2(0.5, 0, 1, 5);  outer.Size = dim2(1, 0, 0, T)
+					end
+					-- ammo fill has a gradient; rotate it to run along the bar (health is a solid lerp)
+					if key == "ammo" and objects.ammo_grad then objects.ammo_grad.Rotation = horiz and 0 or 90 end
 				end
 
 				-- state
@@ -3819,6 +3865,27 @@
 				-- drag state, driven entirely by native hover (no absolute/inset math)
 				local dragging, hover_side, hover_before, hover_palette = nil, nil, nil, false
 
+				-- Drag ghost: a floating clone of the chip that follows the cursor while dragging,
+				-- so it reads as "picking up" the element instead of teleporting on drop. Lives on
+				-- the shared sgui (IgnoreGuiInset), so its Y adds gui_offset to sit at the cursor.
+				local drag_ghost = nil
+				local function make_drag_ghost(label)
+					if drag_ghost then pcall(function() drag_ghost:Destroy() end) end
+					drag_ghost = library:create("TextLabel", {
+						Parent = sgui; Name = "\0"; FontFace = library.font; Active = false;
+						Text = label or ""; TextColor3 = TXT; BackgroundColor3 = ACCENT;
+						BackgroundTransparency = 0.3; BorderSizePixel = 0; ZIndex = 9999;
+						AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 16); TextSize = 12;
+						TextXAlignment = Enum.TextXAlignment.Center;
+					})
+					library:create("UICorner", {Parent = drag_ghost; CornerRadius = dim(0, 3)})
+					library:create("UIPadding", {Parent = drag_ghost; PaddingLeft = dim(0, 5); PaddingRight = dim(0, 5)})
+					library:create("UIStroke", {Parent = drag_ghost; Color = ACCENT; Thickness = 1; LineJoinMode = Enum.LineJoinMode.Miter})
+				end
+				local function kill_drag_ghost()
+					if drag_ghost then pcall(function() drag_ghost:Destroy() end); drag_ghost = nil end
+				end
+
 				-- MAIN vs AI tab: the same chips/preview edit two independent layouts, saved to
 				-- esp_layout (players) and esp_layout_ai (AI). The tab bar (built below) flips it.
 				local layout_ctx = "player"
@@ -3844,10 +3911,10 @@
 					for _, c in ipairs(CHIPS) do
 						local chip = palette_chips[c.key]
 						if chip then
-							if GLOBAL_KEYS[c.key] then
-								-- globals toggle a whole-preview visual (there's nothing to drag
-								-- ONTO the box), so their chip lives in the tray permanently and
-								-- shows a faint accent fill while ON — the tray IS their on/off.
+							if GLOBAL_KEYS[c.key] or BAR_KEYS[c.key] then
+								-- globals/bars live in the tray permanently and show a faint accent
+								-- fill while ON — the tray doubles as their on/off state (a global has
+								-- nothing to drag onto the box; a bar's placement lives on the box).
 								chip.Visible = true
 								chip_active[chip] = placed[c.key] ~= nil
 								chip.BackgroundTransparency = chip_active[chip] and 0.35 or 1
@@ -3859,6 +3926,14 @@
 				end
 
 				local function place(key, side, before_key)
+					if BAR_KEYS[key] then
+						side = side or DEFAULT_BAR_SIDE[key] or "bottom"
+						placed[key] = side; cfg._show[key] = true
+						apply_bar(key, side)
+						refresh_palette(); save_layout()
+						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
+						return
+					end
 					if GLOBAL_KEYS[key] then
 						placed[key] = "on"; cfg._show[key] = true
 						refresh_palette(); save_layout()
@@ -3885,6 +3960,12 @@
 				end
 
 				local function unplace(key)
+					if BAR_KEYS[key] then
+						placed[key] = nil; cfg._show[key] = false
+						refresh_palette(); save_layout()
+						if cfg.refresh_elements then pcall(cfg.refresh_elements) end
+						return
+					end
 					if GLOBAL_KEYS[key] then
 						placed[key] = nil; cfg._show[key] = false
 						refresh_palette(); save_layout()
@@ -3911,11 +3992,12 @@
 					end)
 				end
 
-				local function bind_drag(src, key)
+				local function bind_drag(src, key, label)
 					library:connection(src.InputBegan, function(input)
 						if input.UserInputType == Enum.UserInputType.MouseButton1
 							or input.UserInputType == Enum.UserInputType.Touch then
 							dragging = key; hover_side = nil; hover_before = nil; hover_palette = false
+							make_drag_ghost(label)
 						end
 					end)
 				end
@@ -3944,7 +4026,15 @@
 					if input.UserInputType ~= Enum.UserInputType.MouseButton1
 						and input.UserInputType ~= Enum.UserInputType.Touch then return end
 					local key = dragging; dragging = nil
-					if GLOBAL_KEYS[key] then
+					if BAR_KEYS[key] then
+						-- bar chip needs a side; drop on a side zone places it there (orientation
+						-- follows the side). A click / drop back on the tray toggles it; a drop on
+						-- the box with no side falls back to the bar's default side.
+						if hover_side then place(key, hover_side)
+						elseif library:hovering(tray_wrap) then
+							if placed[key] then unplace(key) else place(key) end
+						else place(key) end
+					elseif GLOBAL_KEYS[key] then
 						-- global chip: dropped on a box side = ON; a click/drop back on the tray
 						-- TOGGLES it. hover_palette only fires on ENTER, so a click that never
 						-- leaves the tray wouldn't set it — test the tray at release instead.
@@ -3958,6 +4048,7 @@
 					elseif hover_palette then unplace(key)
 					elseif hover_side then place(key, hover_side, hover_before) end
 					hover_side = nil; hover_before = nil; hover_palette = false
+					kill_drag_ghost()
 				end)
 
 				-- wire each real element as a drag source + build its palette chip. Each chip
@@ -3973,7 +4064,7 @@
 						if o and not GLOBAL_KEYS[c.key] then
 							normalize(o)
 							add_hover(o)
-							bind_drag(o, c.key)
+							bind_drag(o, c.key, c.label)
 							-- during a drag, hovering a placed chip = insert before it
 							library:connection(o.MouseEnter, function()
 								if dragging and dragging ~= c.key and placed[c.key] then
@@ -3993,7 +4084,7 @@
 						library:create("UIPadding", {Parent = chip; PaddingLeft = dim(0, 4); PaddingRight = dim(0, 4)})
 						palette_chips[c.key] = chip
 						add_hover(chip)
-						bind_drag(chip, c.key)
+						bind_drag(chip, c.key, c.label)
 					end)
 					if not okc then
 						warn("[ESP chip " .. tostring(c.key) .. "] " .. tostring(errc))
@@ -4001,11 +4092,76 @@
 					end
 				end
 
+				-- ── HOVER SELECTION ("selection cube") + drag-ghost mover ──────────────────
+				-- The drawn visuals (box / skeleton / chams / head dot / healthbar / ammo) keep
+				-- drawing; hovering one pops an accent selection outline around it and records
+				-- cfg._selected_key. Right-click over a selection calls cfg.on_element_rightclick
+				-- (nil for now — that's the hook the future options menu wires into). ONE shared
+				-- overlay, snapped to the hovered element via its AbsolutePosition so it works
+				-- across the different parents / coord-spaces the visuals live in.
+				local sel_overlay = library:create("Frame", {
+					Parent = items.viewportframe; Name = "\0"; Visible = false;
+					BackgroundTransparency = 1; BorderSizePixel = 0; ZIndex = 9;
+				})
+				library:create("UIStroke", {Parent = sel_overlay; Color = ACCENT; Thickness = 1.5; LineJoinMode = Enum.LineJoinMode.Miter})
+				library:create("UICorner", {Parent = sel_overlay; CornerRadius = dim(0, 3)})
+
+				-- topmost drawn element under the cursor (small visuals win over the whole box)
+				local function pick_hover()
+					local o = objects
+					if o.head_dot and o.head_dot.Visible and library:hovering(o.head_dot) then return o.head_dot, "head_dot" end
+					if o.chams_box and o.chams_box.Visible and library:hovering(o.chams_box) then return o.chams_box, "chams" end
+					if o.skel_box and o.skel_box.Visible and library:hovering(o.skel_box) then return o.skel_box, "skeleton" end
+					if o.ammo_bg and o.ammo_bg.Parent == o.holder and library:hovering(o.ammo_bg) then return o.ammo_bg, "ammo" end
+					if o.healthbar_holder and o.healthbar_holder.Parent == o.holder and library:hovering(o.healthbar_holder) then return o.healthbar_holder, "healthbar" end
+					if cfg._show and cfg._show.box and o.holder and library:hovering(o.holder) then return o.holder, "box" end
+					return nil
+				end
+				cfg._selected_key = nil
+				local function update_selection()
+					if dragging then sel_overlay.Visible = false; cfg._selected_key = nil; return end
+					local e, key = pick_hover()
+					if not e then sel_overlay.Visible = false; cfg._selected_key = nil; return end
+					local vpp = items.viewportframe.AbsolutePosition
+					local ap, av = e.AbsolutePosition, e.AbsoluteSize
+					sel_overlay.Position = dim2(0, ap.X - vpp.X - 3, 0, ap.Y - vpp.Y - 3)
+					sel_overlay.Size = dim2(0, av.X + 6, 0, av.Y + 6)
+					sel_overlay.Visible = true
+					cfg._selected_key = key
+				end
+
+				-- per-frame: move the drag ghost to the cursor + drive the hover selection.
+				-- Cheap (a few hover checks); gated to when the preview panel is on-screen.
+				library:connection(run.RenderStepped, function()
+					if drag_ghost then
+						if dragging then
+							local m = uis:GetMouseLocation()
+							drag_ghost.Position = dim2(0, m.X + 12, 0, m.Y + gui_offset - 6)
+						else
+							kill_drag_ghost()   -- release missed? clean it up
+						end
+					end
+					if cfg._preview_sg and not cfg._preview_sg.Enabled then
+						if sel_overlay.Visible then sel_overlay.Visible = false end
+						return
+					end
+					update_selection()
+				end)
+
+				-- right-click groundwork: over a selected element, hand the key to the (future)
+				-- options menu. cfg.on_element_rightclick is unset for now, so this is a no-op.
+				library:connection(uis.InputBegan, function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton2
+						and cfg._selected_key and cfg.on_element_rightclick then
+						pcall(cfg.on_element_rightclick, cfg._selected_key)
+					end
+				end)
+
 				-- initial placement: from the esp_layout flag, else the defaults
 				local function apply_from_string(str)
 					for _, c in ipairs(CHIPS) do
 						if placed[c.key] then
-							if GLOBAL_KEYS[c.key] then cfg._show[c.key] = false
+							if GLOBAL_KEYS[c.key] or BAR_KEYS[c.key] then cfg._show[c.key] = false
 							else objects[c.key].Parent = library.cache end
 							placed[c.key] = nil; order[c.key] = nil
 						end
@@ -4015,6 +4171,8 @@
 						local k, s, ord = entry:match("^([%w_]+):(%w+):([%d%.]+)$")
 						if k and s and GLOBAL_KEYS[k] then
 							placed[k] = "on"; cfg._show[k] = true; any = true   -- side ignored for globals
+						elseif k and s and BAR_KEYS[k] then
+							placed[k] = s; cfg._show[k] = true; apply_bar(k, s); any = true   -- bar remembers its side
 						elseif k and s and objects[k] and containers[s] then
 							objects[k].Parent = containers[s]; placed[k] = s; order[k] = tonumber(ord) or 1; any = true
 						end
