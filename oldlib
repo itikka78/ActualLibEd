@@ -4243,7 +4243,7 @@
 				-- MAIN vs AI tabs each get their own flag-bound panel. If no panels are
 				-- registered the whole thing is inert and right-click stays a no-op.
 				local settings_panels = properties.panels or {}
-				local settings_pop, settings_body, settings_built
+				local settings_pop, settings_body, settings_built, settings_scale
 				if next(settings_panels) ~= nil then
 					settings_built = {}   -- "key:ctx" -> wrapper frame (lazy, build once)
 					settings_pop = library:create("Frame", {
@@ -4259,6 +4259,7 @@
 						}) library:apply_theme(st, "accent", "Color")
 					end
 					library:create("UICorner", {Parent = settings_pop; CornerRadius = dim(0, 4)})
+					settings_scale = library:create("UIScale", {Parent = settings_pop; Scale = 1})
 					library:create("UIListLayout", {
 						Parent = settings_pop; FillDirection = Enum.FillDirection.Vertical;
 						SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
@@ -4294,23 +4295,61 @@
 					local ctx = layout_ctx                     -- MAIN vs AI: bind the right flags
 					local bkey = tostring(key) .. ":" .. ctx
 					if not settings_built[bkey] then
+						-- Build the element's controls DIRECTLY into a lightweight host (a table
+						-- whose metatable is `library`, so host:toggle/slider/colorpicker/dropdown
+						-- resolve to the real builders and parent into `content`). This is the same
+						-- surface a section exposes MINUS the section's ScrollingFrame/auto-size
+						-- chrome — that chrome rendered as an empty black box in a floating popup.
 						local wrap = library:create("Frame", {
 							Parent = settings_body; Name = "\0"; Visible = false;
 							BackgroundTransparency = 1; BorderSizePixel = 0;
 							Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
 						})
-						local host = library.section({holder = wrap}, {name = (LABELS[key] or key) .. " Settings"})
+						library:create("UIListLayout", {
+							Parent = wrap; FillDirection = Enum.FillDirection.Vertical;
+							SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 3);
+						})
+						local ttl = library:create("TextLabel", {
+							Parent = wrap; Name = "\0"; LayoutOrder = 0; FontFace = library.font;
+							Text = (LABELS[key] or key):upper(); TextColor3 = ACCENT; TextSize = 12;
+							BackgroundTransparency = 1; BorderSizePixel = 0; Size = dim2(1, 0, 0, 14);
+							TextXAlignment = Enum.TextXAlignment.Left;
+						}) library:apply_theme(ttl, "accent", "TextColor3")
+						local content = library:create("Frame", {
+							Parent = wrap; Name = "\0"; LayoutOrder = 1;
+							BackgroundTransparency = 1; BorderSizePixel = 0;
+							Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+						})
+						library:create("UIListLayout", {
+							Parent = content; FillDirection = Enum.FillDirection.Vertical;
+							SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
+						})
+						local host = setmetatable({holder = content, right_holder = content}, library)
 						local okp, errp = pcall(settings_panels[key], host, key, ctx)
 						if not okp then
 							warn("[ESP panel " .. tostring(key) .. "] " .. tostring(errp))
 							pcall(function() library:log("ESP panel '" .. tostring(key) .. "' failed: " .. tostring(errp), "ERROR") end)
+							library:create("TextLabel", {
+								Parent = content; Name = "\0"; FontFace = library.font;
+								Text = "settings failed to load"; TextColor3 = TXT; TextSize = 11;
+								BackgroundTransparency = 1; BorderSizePixel = 0; Size = dim2(1, 0, 0, 14);
+								TextXAlignment = Enum.TextXAlignment.Left;
+							})
 						end
 						settings_built[bkey] = wrap
 					end
 					for k, w in pairs(settings_built) do w.Visible = (k == bkey) end
 					local m = uis:GetMouseLocation()
-					settings_pop.Position = dim2(0, m.X + 14, 0, m.Y - 6)   -- raw (IgnoreGuiInset sgui)
+					-- clean drop-down reveal: appear slightly high + scaled down, then ease into
+					-- place (Quad Out) so the "+"-style panel slides/settles instead of popping.
+					local tx, ty = m.X + 14, m.Y - 6
+					settings_pop.Position = dim2(0, tx, 0, ty - 10)
+					settings_scale.Scale = 0.9
 					settings_pop.Visible = true
+					tween_service:Create(settings_pop, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{Position = dim2(0, tx, 0, ty)}):Play()
+					tween_service:Create(settings_scale, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{Scale = 1}):Play()
 				end
 				cfg.on_element_rightclick = open_settings
 
@@ -4319,6 +4358,28 @@
 					if input.UserInputType == Enum.UserInputType.MouseButton2
 						and cfg._selected_key and cfg.on_element_rightclick then
 						pcall(cfg.on_element_rightclick, cfg._selected_key)
+					end
+				end)
+
+				-- click-off closes the popup. Skips clicks INSIDE the popup (hovering it) and clicks
+				-- while a colorpicker/dropdown popup is open (library.current_element_open), so
+				-- picking a colour or a dropdown item doesn't dismiss the whole panel.
+				library:connection(uis.InputBegan, function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1
+						and input.UserInputType ~= Enum.UserInputType.Touch then return end
+					if not (settings_pop and settings_pop.Visible) then return end
+					if library.current_element_open then return end
+					if library:hovering(settings_pop) then return end
+					settings_pop.Visible = false
+				end)
+
+				-- auto-hide with the UI: when the preview panel / menu is toggled off, the popup
+				-- lives on the shared sgui overlay (which stays enabled), so hide it explicitly
+				-- instead of leaving it stuck on screen.
+				library:connection(run.RenderStepped, function()
+					if settings_pop and settings_pop.Visible
+						and cfg._preview_sg and not cfg._preview_sg.Enabled then
+						settings_pop.Visible = false
 					end
 				end)
 
