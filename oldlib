@@ -4246,8 +4246,14 @@
 				local settings_pop, settings_body, settings_built, settings_scale
 				if next(settings_panels) ~= nil then
 					settings_built = {}   -- "key:ctx" -> wrapper frame (lazy, build once)
+					-- Sibling ZIndexBehavior: without it the popup frame (a high ZIndex) paints
+					-- OVER its own low-ZIndex child controls (they build + size the box but never
+					-- show — the empty "black box"). Sibling makes descendants always draw above
+					-- ancestors. ZIndex kept at 1 so a colorpicker opened from a control (its holder
+					-- is a ZIndex-1 sibling on sgui) still layers above the panel.
+					pcall(function() sgui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling end)
 					settings_pop = library:create("Frame", {
-						Parent = sgui; Name = "\0"; Visible = false; ZIndex = 9990;
+						Parent = sgui; Name = "\0"; Visible = false; ZIndex = 1;
 						BackgroundColor3 = themes.preset.high_contrast; BorderSizePixel = 0;
 						AnchorPoint = vec2(0, 0); Size = dim2(0, 226, 0, 0);
 						AutomaticSize = Enum.AutomaticSize.Y;
