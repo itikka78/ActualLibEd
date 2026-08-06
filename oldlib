@@ -1923,6 +1923,7 @@
 					pos_key = "MainWindow",   -- stable key: the name carries the version, which changes
 					size = dim2(0, 604, 0, 628),
 					position = dim2(0, (camera.ViewportSize.X / 2) - 302 - 96, 0, (camera.ViewportSize.Y / 2) - 421 - 12),
+					top_drag = true,   -- only the title-bar strip drags the window; body/tabs stay free
 					image = library:image("main.png", "rbxassetid://98823308062942"),
 				})
 				register_icon(main_window, "main.png", "home2.png", "rbxassetid://98823308062942")
@@ -3486,6 +3487,17 @@
 						BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.Y;
 						TextXAlignment = Enum.TextXAlignment.Center; TextSize = 11;
 					});
+					-- Ammo Counter: its OWN placeable tag now (split from the bar). Starts in the
+					-- tray (parented to the cache) like the other text chips; place() reparents it.
+					objects[ "ammo_counter" ] = library:create( "TextLabel" , {
+						FontFace = library.font; Parent = library.cache;
+						TextColor3 = rgb(255, 255, 255); BorderColor3 = rgb(0, 0, 0);
+						Text = "21 / 30"; Name = "\0"; TextStrokeTransparency = 0;
+						AnchorPoint = vec2(0, 0); Size = dim2(0, 90, 0, 0);
+						BackgroundTransparency = 1; Position = dim2(1, 6, 0, 0);
+						BorderSizePixel = 0; AutomaticSize = Enum.AutomaticSize.Y;
+						TextXAlignment = Enum.TextXAlignment.Left; TextSize = 12;
+					});
 
 					-- Head dot (projected onto the head each frame; lives in the viewport)
 					objects[ "head_dot" ] = library:create( "Frame" , {
@@ -3749,6 +3761,7 @@
 					{key = "combat",    label = "Combat"},
 					{key = "looting",   label = "Looting"},
 					{key = "stats",     label = "Stats"},
+						{key = "ammo_counter", label = "Ammo Count"},
 					-- global toggle chips: whole-preview visuals, NOT side-anchored. Drag out
 					-- of the tray to turn ON, drag back to the tray to turn OFF.
 					{key = "box",       label = "Box",       global = true},
@@ -4036,7 +4049,7 @@
 					box = "Boxes", skeleton = "Skeleton", chams = "Chams", head_dot = "HeadDot",
 					healthbar = "Healthbar", ammo = "Ammobar",
 					name = "Names", distance = "Distance", weapon = "Weapon",
-					hp_number = "HP_Text", kd = "ESP_KD", edition = "ESP_Edition",
+					hp_number = "HP_Text", kd = "ESP_KD", edition = "ESP_Edition", ammo_counter = "Ammo_Counter",
 				}
 				-- status chips (vis/manip/reload/exiting/combat/looting) aren't booleans — they
 				-- drive the ESP_Status_Sel MULTISELECT the renderer reads. Placing one adds its
