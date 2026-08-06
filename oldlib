@@ -3007,8 +3007,12 @@
 					if o.holder then
 						local box_on = (B and B.box == true) or (not B and flags["Boxes"] == true)
 						if not o.box_fill then
+							-- ZIndex 1 (not 0): a ViewportFrame occludes 2D children at ZIndex 0
+							-- behind its 3D scene, which is why the fill never showed while the
+							-- outline (default ZIndex 1) did. Translucent, so the outline reads
+							-- through it even though it's the same layer.
 							local f = library:create("Frame", {
-								Parent = o.holder; Name = "\0"; ZIndex = 0; Visible = false;
+								Parent = o.holder; Name = "\0"; ZIndex = 1; Visible = false;
 								BackgroundColor3 = rgb(255, 255, 255); BorderSizePixel = 0;
 								Size = dim2(1, 0, 1, 0); Position = dim2(0, 0, 0, 0);
 							})
@@ -4337,16 +4341,16 @@
 					})
 				end
 
-				local function open_settings(key)
-					if not settings_pop or not settings_panels[key] then return end
-					local ctx = layout_ctx                     -- MAIN vs AI: bind the right flags
-					local bkey = tostring(key) .. ":" .. ctx
+				-- show_panel: the shared right-click popup. Builds `builder(host)` ONCE into a
+				-- titled wrapper keyed by bkey (host = a table whose metatable is `library`, so
+				-- host:toggle/slider/colorpicker/dropdown resolve to the real builders and parent
+				-- into a plain `content` frame — a section's control surface without its
+				-- ScrollingFrame chrome, which rendered as an empty black box in a floating popup),
+				-- then shows + tweens it. Used by both the char element panels (open_settings) and
+				-- the world chip panels.
+				local function show_panel(bkey, title, builder)
+					if not settings_pop then return end
 					if not settings_built[bkey] then
-						-- Build the element's controls DIRECTLY into a lightweight host (a table
-						-- whose metatable is `library`, so host:toggle/slider/colorpicker/dropdown
-						-- resolve to the real builders and parent into `content`). This is the same
-						-- surface a section exposes MINUS the section's ScrollingFrame/auto-size
-						-- chrome — that chrome rendered as an empty black box in a floating popup.
 						local wrap = library:create("Frame", {
 							Parent = settings_body; Name = "\0"; Visible = false;
 							BackgroundTransparency = 1; BorderSizePixel = 0;
@@ -4358,7 +4362,7 @@
 						})
 						local ttl = library:create("TextLabel", {
 							Parent = wrap; Name = "\0"; LayoutOrder = 0; FontFace = library.font;
-							Text = (LABELS[key] or key):upper(); TextColor3 = ACCENT; TextSize = 12;
+							Text = tostring(title or ""):upper(); TextColor3 = ACCENT; TextSize = 12;
 							BackgroundTransparency = 1; BorderSizePixel = 0; Size = dim2(1, 0, 0, 14);
 							TextXAlignment = Enum.TextXAlignment.Left;
 						}) library:apply_theme(ttl, "accent", "TextColor3")
@@ -4372,10 +4376,10 @@
 							SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 4);
 						})
 						local host = setmetatable({holder = content, right_holder = content}, library)
-						local okp, errp = pcall(settings_panels[key], host, key, ctx)
+						local okp, errp = pcall(builder, host)
 						if not okp then
-							warn("[ESP panel " .. tostring(key) .. "] " .. tostring(errp))
-							pcall(function() library:log("ESP panel '" .. tostring(key) .. "' failed: " .. tostring(errp), "ERROR") end)
+							warn("[ESP panel " .. tostring(bkey) .. "] " .. tostring(errp))
+							pcall(function() library:log("ESP panel '" .. tostring(bkey) .. "' failed: " .. tostring(errp), "ERROR") end)
 							library:create("TextLabel", {
 								Parent = content; Name = "\0"; FontFace = library.font;
 								Text = "settings failed to load"; TextColor3 = TXT; TextSize = 11;
@@ -4397,6 +4401,12 @@
 						{Position = dim2(0, tx, 0, ty)}):Play()
 					tween_service:Create(settings_scale, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 						{Scale = 1}):Play()
+				end
+				local function open_settings(key)
+					if not settings_panels[key] then return end   -- ctx binds the right flags (player/ai)
+					show_panel(tostring(key) .. ":" .. layout_ctx, LABELS[key] or key, function(host)
+						settings_panels[key](host, key, layout_ctx)
+					end)
 				end
 				cfg.on_element_rightclick = open_settings
 
@@ -4520,6 +4530,80 @@
 					return b
 				end
 
+				-- ── WORLD CONTEXTS (Body / Exit / Item / Container) ────────────────────────
+				-- Non-character ESP. Each context is an on/off chip set over the real world-ESP
+				-- flags: click a chip to toggle it, right-click for its settings. The preview is
+				-- EMPTY for these (character + box hidden). Driven by properties.world_contexts:
+				--   { {ctx, label, master, chips = { {key, label, flag, panel?}, ... }}, ... }
+				local world_defs = properties.world_contexts or {}
+				local WORLD = {}
+				for _, d in ipairs(world_defs) do WORLD[d.ctx] = d end
+				local function is_world(ctx) return WORLD[ctx] ~= nil end
+
+				-- world chip tray: stacks in the section like the char tray, shown only while a
+				-- world context is active; holds a per-context wrapping row of on/off chips.
+				local world_tray = library:create("Frame", {
+					Parent = self.holder; Name = "\0"; LayoutOrder = 50; Visible = false;
+					Size = dim2(1, -8, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+					BackgroundTransparency = 1; BorderSizePixel = 0;
+				})
+				local world_frames = {}
+				local function world_master_refresh(def)
+					local anyOn = false
+					for _, c in ipairs(def.chips) do if flags[c.flag] == true then anyOn = true; break end end
+					flags[def.master] = anyOn
+				end
+				for _, def in ipairs(world_defs) do
+					local wf = library:create("Frame", {
+						Parent = world_tray; Name = "\0"; Visible = false;
+						Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+						BackgroundTransparency = 1; BorderSizePixel = 0;
+					})
+					local wl = library:create("UIListLayout", {
+						Parent = wf; FillDirection = Enum.FillDirection.Horizontal;
+						HorizontalAlignment = Enum.HorizontalAlignment.Left;
+						SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 6);
+					})
+					pcall(function() wl.Wraps = true end)
+					world_frames[def.ctx] = wf
+					for i, chip in ipairs(def.chips) do
+						local btn = library:create("TextLabel", {
+							Parent = wf; Name = "\0"; Active = true; FontFace = library.font;
+							Text = chip.label; TextColor3 = TXT; BackgroundColor3 = ACCENT;
+							BackgroundTransparency = 1; BorderSizePixel = 0; LayoutOrder = i;
+							AutomaticSize = Enum.AutomaticSize.X; Size = dim2(0, 0, 0, 16); TextSize = 12;
+						})
+						library:create("UICorner", {Parent = btn; CornerRadius = dim(0, 3)})
+						library:create("UIPadding", {Parent = btn; PaddingLeft = dim(0, 5); PaddingRight = dim(0, 5)})
+						local function paint() btn.BackgroundTransparency = (flags[chip.flag] == true) and 0.35 or 1 end
+						paint()
+						library:connection(btn.InputBegan, function(input)
+							if input.UserInputType == Enum.UserInputType.MouseButton1
+								or input.UserInputType == Enum.UserInputType.Touch then
+								flags[chip.flag] = not (flags[chip.flag] == true)   -- click toggles on/off
+								world_master_refresh(def)
+								paint()
+								if properties.on_apply then pcall(properties.on_apply, chip.key, flags[chip.flag], def.ctx) end
+							elseif input.UserInputType == Enum.UserInputType.MouseButton2 and chip.panel then
+								show_panel("w:" .. def.ctx .. ":" .. chip.key, chip.label, function(host) chip.panel(host, chip, def) end)
+							end
+						end)
+					end
+				end
+				local function show_world_ctx(ctx)
+					for id, wf in pairs(world_frames) do wf.Visible = (id == ctx) end
+					world_tray.Visible = (ctx ~= nil)
+				end
+				-- char-preview visibility: hide the cloned character + box overlays + the char
+				-- chip system (tray + side lanes) for world contexts, so their preview is empty.
+				local function show_char_preview(on)
+					if character then character.Parent = on and items.viewportframe or library.cache end
+					if objects.holder then objects.holder.Visible = on end
+					if tray_wrap then tray_wrap.Visible = on end
+					for _, s in ipairs(SIDES) do if containers[s] then containers[s].Visible = on end end
+					if sel_overlay and not on then sel_overlay.Visible = false end
+				end
+
 				local function set_context(ctx)
 					if ctx == layout_ctx then return end
 					-- close the settings popup (+ any open dropdown) from the tab we're leaving,
@@ -4532,16 +4616,25 @@
 							library.current_element_open = nil
 						end)
 					end
-					save_layout()                       -- persist the tab we're leaving
+					if not is_world(layout_ctx) then save_layout() end   -- persist the CHAR tab we leave
 					layout_ctx = ctx
-					-- pcall so a bad saved layout / transient nil can't hard-break the switch and
-					-- leave the builder half-cleared (was the intermittent "AI tab breaks").
-					local ok, err = pcall(apply_from_string, flags[lflag()])
-					if not ok then
-						warn("[ESP tab " .. tostring(ctx) .. "] " .. tostring(err))
-						pcall(function() library:log("ESP tab switch to '" .. tostring(ctx) .. "' failed: " .. tostring(err), "ERROR") end)
+					if is_world(ctx) then
+						-- world context: empty the preview + show this context's on/off chip set
+						show_char_preview(false)
+						show_world_ctx(ctx)
+					else
+						-- char context: restore the character preview + its chip layout. pcall so a
+						-- bad saved layout can't hard-break the switch (was the intermittent "AI tab
+						-- breaks").
+						show_world_ctx(nil)
+						show_char_preview(true)
+						local ok, err = pcall(apply_from_string, flags[lflag()])
+						if not ok then
+							warn("[ESP tab " .. tostring(ctx) .. "] " .. tostring(err))
+							pcall(function() library:log("ESP tab switch to '" .. tostring(ctx) .. "' failed: " .. tostring(err), "ERROR") end)
+						end
+						save_layout()
 					end
-					save_layout()
 					for k, b in pairs(tab_btns) do
 						-- no background glow: only the TEXT colour changes (accent = selected),
 						-- read live so it follows the current theme (accent/text), not a stale blue
@@ -4551,6 +4644,15 @@
 
 				make_tab("player", "MAIN", 1).MouseButton1Click:Connect(function() set_context("player") end)
 				make_tab("ai",     "AI",   2).MouseButton1Click:Connect(function() set_context("ai") end)
+				-- world-context tabs (Body / Exit / Item / Container), from properties.world_contexts
+				do
+					local ord = 3
+					for _, def in ipairs(world_defs) do
+						local id = def.ctx
+						make_tab(id, def.label, ord).MouseButton1Click:Connect(function() set_context(id) end)
+						ord = ord + 1
+					end
+				end
 
 				-- initial: MAIN tab, from esp_layout (else defaults)
 				apply_from_string(flags[lflag()])
