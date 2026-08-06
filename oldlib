@@ -2476,24 +2476,27 @@
 					end})
 			--
 					
-			-- esp preview
-				local holder = library:panel({
-					name = "ESP Preview",
-					anchor_point = vec2(0, 0),
-					size = dim2(0, 330, 0, 348),
-					top_drag = true,   -- only the title bar drags the window (body = ESP builder)
-					position = dim2(0, style.items.main_holder.AbsolutePosition.X, 0, style.items.main_holder.AbsolutePosition.Y + style.items.main_holder.AbsoluteSize.Y + 2),
-					-- the "</>" glyph is just what this icon set ships; it's the ESP Preview button
-					image = library:image("output.png", "rbxassetid://77684377836328"),
-				})
-				register_icon(holder, "output.png", "esp_preview2.png", "rbxassetid://77684377836328")
+			-- esp preview — SKIPPED when the consumer sets library.embed_esp (the ESP builder
+			-- is created inside a normal tab section instead of this floating panel).
+				if not library.embed_esp then
+					local holder = library:panel({
+						name = "ESP Preview",
+						anchor_point = vec2(0, 0),
+						size = dim2(0, 330, 0, 348),
+						top_drag = true,   -- only the title bar drags the window (body = ESP builder)
+						position = dim2(0, style.items.main_holder.AbsolutePosition.X, 0, style.items.main_holder.AbsolutePosition.Y + style.items.main_holder.AbsoluteSize.Y + 2),
+						-- the "</>" glyph is just what this icon set ships; it's the ESP Preview button
+						image = library:image("output.png", "rbxassetid://77684377836328"),
+					})
+					register_icon(holder, "output.png", "esp_preview2.png", "rbxassetid://77684377836328")
 
-				local items = holder.items
+					local items = holder.items
 
-				local column = setmetatable(items, library):column()
-				-- blank title: the MAIN/AI tab row (built in esp_preview) names this panel,
-				-- so a "Main" section header here would just duplicate it
-				window.esp_section = column:section({name = ""})
+					local column = setmetatable(items, library):column()
+					-- blank title: the MAIN/AI tab row (built in esp_preview) names this panel,
+					-- so a "Main" section header here would just duplicate it
+					window.esp_section = column:section({name = ""})
+				end
 			--  
 
 			-- playerlist 
@@ -4035,12 +4038,31 @@
 					name = "Names", distance = "Distance", weapon = "Weapon",
 					hp_number = "HP_Text", kd = "ESP_KD", edition = "ESP_Edition",
 				}
+				-- status chips (vis/manip/reload/exiting/combat/looting) aren't booleans — they
+				-- drive the ESP_Status_Sel MULTISELECT the renderer reads. Placing one adds its
+				-- name to that array; unplacing removes it. ctx-aware (AI_ESP_Status_Sel on AI).
+				local STATUS_MAP = { vis = "Visible", manip = "Manip", reload = "Reload",
+					exiting = "Exiting", combat = "Combat", looting = "Looting" }
+				local function sync_status(key, on)
+					local name = STATUS_MAP[key]
+					if not name then return end
+					local fl = (layout_ctx == "ai") and "AI_ESP_Status_Sel" or "ESP_Status_Sel"
+					local arr = flags[fl]; if type(arr) ~= "table" then arr = {} end
+					local out = {}
+					for _, v in ipairs(arr) do if v ~= name then out[#out + 1] = v end end   -- drop existing
+					if on then out[#out + 1] = name end
+					flags[fl] = out
+					if properties.on_apply then pcall(properties.on_apply, key, on, layout_ctx) end
+				end
 				local function sync_real_flag(key, on)
 					local fl = REAL_FLAG[key]
-					if not fl then return end
-					if layout_ctx == "ai" then fl = "AI_" .. fl end
-					flags[fl] = on and true or false
-					if properties.on_apply then pcall(properties.on_apply, key, on, layout_ctx) end
+					if fl then
+						if layout_ctx == "ai" then fl = "AI_" .. fl end
+						flags[fl] = on and true or false
+						if properties.on_apply then pcall(properties.on_apply, key, on, layout_ctx) end
+					else
+						sync_status(key, on)   -- not a boolean flag → maybe a status chip
+					end
 				end
 
 				local function place(key, side, before_key)
@@ -4498,6 +4520,7 @@
 					-- push ON here — not OFF for unplaced keys — so an existing ESP-tab toggle
 					-- isn't silently cleared at load during the toggle->builder transition.
 					for k in pairs(REAL_FLAG) do if placed[k] ~= nil then sync_real_flag(k, true) end end
+					for k in pairs(STATUS_MAP) do if placed[k] ~= nil then sync_status(k, true) end end
 					-- reflect box on/off (its show/hide lives in refresh_elements, not the overlay)
 					if cfg.refresh_elements then pcall(cfg.refresh_elements) end
 				end
@@ -4604,6 +4627,39 @@
 					if sel_overlay and not on then sel_overlay.Visible = false end
 				end
 
+				-- ── CONTEXT FOOTER (Enabled toggle + Render Distance + …) ──────────────────
+				-- Per-context controls shown BELOW the tray (matches the reference). Built once
+				-- per ctx from properties.context_footers[ctx](section, ctx), then shown/hidden on
+				-- switch. Host = a `library`-metatabled table, so section:toggle/slider work.
+				local footer_defs = properties.context_footers or {}
+				local footer_tray = library:create("Frame", {
+					Parent = self.holder; Name = "\0"; LayoutOrder = 60;
+					Size = dim2(1, -8, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+					BackgroundTransparency = 1; BorderSizePixel = 0;
+				})
+				library:create("UIListLayout", {
+					Parent = footer_tray; FillDirection = Enum.FillDirection.Vertical;
+					SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 3);
+				})
+				local footer_frames = {}
+				local function show_footer(ctx)
+					if footer_defs[ctx] and not footer_frames[ctx] then
+						local wrap = library:create("Frame", {
+							Parent = footer_tray; Name = "\0"; Visible = false;
+							Size = dim2(1, 0, 0, 0); AutomaticSize = Enum.AutomaticSize.Y;
+							BackgroundTransparency = 1; BorderSizePixel = 0;
+						})
+						library:create("UIListLayout", {
+							Parent = wrap; FillDirection = Enum.FillDirection.Vertical;
+							SortOrder = Enum.SortOrder.LayoutOrder; Padding = dim(0, 3);
+						})
+						local host = setmetatable({holder = wrap, right_holder = wrap}, library)
+						pcall(footer_defs[ctx], host, ctx)
+						footer_frames[ctx] = wrap
+					end
+					for id, w in pairs(footer_frames) do w.Visible = (id == ctx) end
+				end
+
 				local function set_context(ctx)
 					if ctx == layout_ctx then return end
 					-- close the settings popup (+ any open dropdown) from the tab we're leaving,
@@ -4618,6 +4674,7 @@
 					end
 					if not is_world(layout_ctx) then save_layout() end   -- persist the CHAR tab we leave
 					layout_ctx = ctx
+					show_footer(ctx)
 					if is_world(ctx) then
 						-- world context: empty the preview + show this context's on/off chip set
 						show_char_preview(false)
@@ -4657,6 +4714,7 @@
 				-- initial: MAIN tab, from esp_layout (else defaults)
 				apply_from_string(flags[lflag()])
 				save_layout()
+				show_footer("player")   -- initial context footer (Enabled + Render Distance)
 				tab_btns.player.TextColor3 = themes.preset.accent
 
 				-- config load re-applies whichever layout is showing (both tabs get a setter)
